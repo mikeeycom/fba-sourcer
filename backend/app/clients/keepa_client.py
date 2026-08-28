@@ -22,12 +22,23 @@ STAT_IDX_RATING = 16
 # Keepa uses negative sentinels (-1, -2) for "no data available" in stats
 # arrays. Any negative value should be treated as missing data.
 
+# Keepa's token bucket can refill as slowly as 1 token/minute depending on
+# plan. Retrying a just-failed ASIN immediately is guaranteed to fail again,
+# so failures are cached for this long before a retry is allowed.
+FAILURE_COOLDOWN_SECONDS = 90
+
 
 class KeepaClient:
     """Client for querying Keepa's Amazon product data API.
 
     Keepa tracks Amazon price and sales-rank history, and provides an
     estimated monthly sold units figure ("monthlySold") for eligible products.
+
+    Caches results in memory for the life of the process: successful
+    lookups are cached indefinitely (product data doesn't change fast
+    enough to matter here), and failures are cached for a cooldown window
+    so a rate-limited ASIN isn't retried before tokens could plausibly
+    have refilled.
     """
 
     def __init__(self, api_key: str = None, timeout: float = 15.0):
@@ -42,10 +53,62 @@ class KeepaClient:
             raise ValueError("KEEPA_API_KEY not set in environment")
 
         self.timeout = timeout
+        self._result_cache: dict[str, dict] = {}
+        self._failure_cooldown: dict[str, float] = {}
         logger.info("Keepa client initialized")
 
     def query_product(self, asin: str, include_history: bool = False) -> dict:
-        """Query Keepa for a product's sales and price data.
+        """Query Keepa for a product's sales and price data, using the cache.
+
+        Serves a cached result if this ASIN succeeded before. If it failed
+        recently, refuses to retry until the cooldown window has passed
+        rather than wasting a call that's certain to hit the rate limit
+        again.
+
+        Args:
+            asin: Amazon Standard Identification Number
+            include_history: Whether to request full price/rank history arrays
+
+        Returns:
+            Dict with asin, title, monthly_sales, current_price, avg_price, rating
+
+        Raises:
+            APIError: If the Keepa request fails, the ASIN isn't found, or
+                this ASIN is still in its post-failure cooldown window
+        """
+        if asin in self._result_cache:
+            logger.info("Keepa cache hit", extra={"asin": asin})
+            return self._result_cache[asin]
+
+        failed_at = self._failure_cooldown.get(asin)
+        if failed_at is not None:
+            elapsed = time.time() - failed_at
+            if elapsed < FAILURE_COOLDOWN_SECONDS:
+                remaining = round(FAILURE_COOLDOWN_SECONDS - elapsed)
+                logger.warning(
+                    "Keepa cooldown active, skipping call",
+                    extra={"asin": asin, "remaining_seconds": remaining},
+                )
+                raise APIError(
+                    f"ASIN {asin} failed recently and is on cooldown for "
+                    f"{remaining}s. Do not retry it. If you already have "
+                    "some validated leads, proceed with submit_leads using "
+                    "those, even if fewer than 5-7, rather than searching "
+                    "for more."
+                )
+            # Cooldown has passed - clear it and allow a fresh attempt.
+            del self._failure_cooldown[asin]
+
+        try:
+            result = self._query_product_uncached(asin, include_history)
+            self._result_cache[asin] = result
+            return result
+        except APIError:
+            self._failure_cooldown[asin] = time.time()
+            raise
+
+    def _query_product_uncached(self, asin: str, include_history: bool = False) -> dict:
+        """Query Keepa's /product endpoint directly, bypassing the cache.
 
         Args:
             asin: Amazon Standard Identification Number
