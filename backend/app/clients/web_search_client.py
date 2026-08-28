@@ -54,88 +54,49 @@ class WebSearchClient:
     def _mock_search(self, query: str, limit: int) -> list[dict]:
         """Return mocked search results for development.
 
-        In production, this would call a real search API.
+        In production, this would call a real search API that also resolves
+        each product to its matching Amazon ASIN (e.g. by UPC/EAN lookup).
+        Until that exists (Phase 4), this mock uses real, verified UK ASINs
+        so the rest of the pipeline (keepa_query, calculate_roi,
+        submit_leads) can be exercised end-to-end without the agent having
+        to invent ASIN data. Titles/prices/sources here are placeholders -
+        only the ASINs are real.
 
         Args:
             query: Search query
             limit: Max results to return
 
         Returns:
-            List of product dicts with title, url, price, source
+            List of product dicts with title, url, price, source, asin
         """
-        # Mock products from various UK retailers
         mock_products = [
             format_web_search_result(
-                title="Premium Kitchen Gadget Set - 12 Piece",
-                url="https://johnlewis.com/product/KG12345",
-                price="£24.99",
-                source="John Lewis",
-            ),
-            format_web_search_result(
-                title="Multi-function Food Processor 800W",
-                url="https://currys.co.uk/product/FP67890",
-                price="£34.99",
-                source="Currys",
-            ),
-            format_web_search_result(
-                title="Stainless Steel Mixing Bowls Set of 3",
-                url="https://lakeland.co.uk/product/MB54321",
+                title="Kitchen Gadget - Candidate 1",
+                url="https://johnlewis.com/product/CAND1",
                 price="£18.99",
-                source="Lakeland",
-            ),
-            format_web_search_result(
-                title="Silicone Baking Mat Set Non-stick",
-                url="https://johnlewis.com/product/BM98765",
-                price="£12.99",
                 source="John Lewis",
+                asin="B07W5JKMNV",
             ),
             format_web_search_result(
-                title="Bamboo Utensil Holder Organizer",
-                url="https://amazon.co.uk/product/UH11111",
-                price="£15.99",
-                source="Amazon",
-            ),
-            format_web_search_result(
-                title="Digital Cooking Thermometer with Probe",
-                url="https://screwfix.com/product/CT22222",
-                price="£19.99",
-                source="Screwfix",
-            ),
-            format_web_search_result(
-                title="Microwave Steamer Cooker Basket",
-                url="https://tesco.com/product/MC33333",
-                price="£9.99",
-                source="Tesco",
-            ),
-            format_web_search_result(
-                title="Ceramic Non-Stick Frying Pan 28cm",
-                url="https://johnlewis.com/product/FP44444",
-                price="£29.99",
-                source="John Lewis",
-            ),
-            format_web_search_result(
-                title="Silicone Spatula Set Heat Resistant",
-                url="https://lakeland.co.uk/product/SP55555",
-                price="£14.99",
-                source="Lakeland",
-            ),
-            format_web_search_result(
-                title="Wooden Cutting Board Set of 4",
-                url="https://currys.co.uk/product/CB66666",
+                title="Kitchen Gadget - Candidate 2",
+                url="https://currys.co.uk/product/CAND2",
                 price="£22.99",
                 source="Currys",
+                asin="B0FL7QLH89",
             ),
             format_web_search_result(
-                title="Stainless Steel Measuring Spoons",
-                url="https://amazon.co.uk/product/MS77777",
-                price="£8.99",
-                source="Amazon",
+                title="Kitchen Gadget - Candidate 3",
+                url="https://lakeland.co.uk/product/CAND3",
+                price="£14.99",
+                source="Lakeland",
+                asin="B0D2QWGF9S",
             ),
             format_web_search_result(
-                title="Glass Mixing Bowl Set with Lids",
-                url="https://tesco.com/product/MB88888",
-                price="£16.99",
+                title="Kitchen Gadget - Candidate 4",
+                url="https://tesco.com/product/CAND4",
+                price="£12.99",
                 source="Tesco",
+                asin="B0CTKR1941",
             ),
         ]
 
