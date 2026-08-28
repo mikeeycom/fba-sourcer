@@ -48,6 +48,18 @@ fba-sourcer/
 └── pyproject.toml     # UV project config
 ```
 
+## How It Works
+
+1. **Submit a search** → Provide a product category (e.g., "kitchen gadgets")
+2. **Agent orchestrates** → Claude decides which tools to use:
+   - Web search to find candidates
+   - Keepa queries to validate sales volume
+   - ROI calculations to verify profitability
+3. **Multi-turn loop** → Claude sees results and decides next steps until finding 5-7 leads
+4. **Manual review** → User reviews results in SellerAmp and Keepa for final validation
+
+The agent autonomously handles the research — you just provide the category and review the results.
+
 ## Environment Variables
 
 Create a `.env` file:
