@@ -67,4 +67,4 @@ build/
 *.egg-info/
 
 # Claude development mds
-.claude/
+claude/
