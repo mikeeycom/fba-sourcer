@@ -8,6 +8,9 @@ from app.config import settings
 from app.models import FindLeadsRequest, FindLeadsResponse, HealthResponse
 from app.utils.logger import get_logger
 from app.utils.exceptions import FBASourcingError
+from app.clients.claude_client import ClaudeClient
+from app.agent.registry import ToolRegistry
+from app.agent.sourcer import SourcerAgent
 
 # Initialize logger
 logger = get_logger(__name__, level=settings.log_level)
@@ -27,6 +30,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Initialize agent components
+claude_client = ClaudeClient(api_key=settings.claude_api_key)
+tool_registry = ToolRegistry()
+sourcer_agent = SourcerAgent(claude_client, tool_registry)
 
 
 @app.exception_handler(FBASourcingError)
@@ -78,21 +86,27 @@ async def health_check():
 async def find_leads(request: FindLeadsRequest) -> FindLeadsResponse:
     """Find qualified FBA leads in a category.
 
-    Returns 5-7 leads meeting criteria:
-    - 50+ monthly sales
-    - 20%+ ROI
+    Orchestrates the sourcing agent to find 5-7 leads meeting criteria:
+    - 50+ monthly sales (via Keepa)
+    - 20%+ ROI (calculated from sourcing cost)
+
+    The agent:
+    1. Searches for products in the category
+    2. Validates sales volume via Keepa
+    3. Calculates ROI for each candidate
+    4. Returns qualified leads
 
     Args:
-        request: Category to search for
+        request: FindLeadsRequest with category to search
 
     Returns:
-        FindLeadsResponse with found leads
+        FindLeadsResponse with list of qualified leads
     """
     try:
         logger.info("Finding leads", extra={"category": request.category})
 
-        # TODO: Implement agent logic here (Phase 2)
-        leads = []
+        # Run sourcing agent
+        leads = sourcer_agent.run(request.category)
 
         logger.info(
             "Leads found",
