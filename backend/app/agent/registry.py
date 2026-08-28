@@ -6,8 +6,10 @@ The registry looks up the handler and delegates to it.
 """
 
 from app.clients.web_search_client import WebSearchClient
+from app.clients.keepa_client import KeepaClient
 from app.utils.calculator import calculate_roi
-from app.agent.tools import format_tool_error, format_roi_result
+from app.utils.exceptions import APIError
+from app.agent.tools import format_tool_error, format_roi_result, format_keepa_result
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -23,6 +25,7 @@ class ToolRegistry:
     def __init__(self):
         """Initialize registry with tool clients."""
         self.web_search_client = WebSearchClient()
+        self.keepa_client = KeepaClient()
 
     def execute_tool(self, tool_name: str, tool_input: dict) -> dict:
         """Execute a tool by name.
@@ -80,19 +83,25 @@ class ToolRegistry:
             tool_input: Dict with 'asin' and optional 'include_history'
 
         Returns:
-            Keepa data or error (not yet implemented)
-
-        Note:
-            Implemented in Phase 3 when Keepa client is ready.
+            Keepa sales/price data or error
         """
         asin = tool_input.get("asin")
         if not asin:
             return format_tool_error("keepa_query", "Missing required parameter: asin")
 
-        # TODO: Implement Keepa client in Phase 3
-        return format_tool_error(
-            "keepa_query", "Keepa integration coming in Phase 3"
-        )
+        include_history = tool_input.get("include_history", False)
+
+        try:
+            product = self.keepa_client.query_product(asin, include_history)
+            return format_keepa_result(
+                asin=product["asin"],
+                monthly_sales=product["monthly_sales"],
+                current_price=product["current_price"],
+                avg_price=product["avg_price"],
+                rating=product["rating"],
+            )
+        except APIError as e:
+            return format_tool_error("keepa_query", str(e))
 
     def _execute_calculate_roi(self, tool_input: dict) -> dict:
         """Execute ROI calculation tool.
