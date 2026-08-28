@@ -14,6 +14,12 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Hard cap on keepa_query calls per agent run. Keepa's token bucket can
+# refill as slowly as 1 token/minute, so an unbounded agent loop could
+# otherwise burn through an entire run's tokens - and future runs' - on a
+# single overly-thorough search.
+MAX_KEEPA_CALLS_PER_RUN = 8
+
 
 class ToolRegistry:
     """Registry mapping tool names to implementations.
@@ -26,6 +32,18 @@ class ToolRegistry:
         """Initialize registry with tool clients."""
         self.web_search_client = WebSearchClient()
         self.keepa_client = KeepaClient()
+        self._keepa_call_count = 0
+
+    def reset(self) -> None:
+        """Reset per-run state. Call this at the start of each agent run.
+
+        The registry itself is a long-lived singleton (one per app process),
+        so per-run counters like the Keepa call cap must be explicitly reset
+        rather than assumed fresh. Note this does NOT clear KeepaClient's
+        cache - cached results and cooldowns are intentionally kept across
+        runs given how scarce Keepa tokens are.
+        """
+        self._keepa_call_count = 0
 
     def execute_tool(self, tool_name: str, tool_input: dict) -> dict:
         """Execute a tool by name.
@@ -89,7 +107,20 @@ class ToolRegistry:
         if not asin:
             return format_tool_error("keepa_query", "Missing required parameter: asin")
 
+        if self._keepa_call_count >= MAX_KEEPA_CALLS_PER_RUN:
+            logger.warning(
+                "Keepa call budget exhausted for this run",
+                extra={"asin": asin, "cap": MAX_KEEPA_CALLS_PER_RUN},
+            )
+            return format_tool_error(
+                "keepa_query",
+                f"Keepa lookup budget for this search ({MAX_KEEPA_CALLS_PER_RUN} calls) "
+                "is exhausted. Submit leads using only the products already validated, "
+                "even if fewer than 5-7.",
+            )
+
         include_history = tool_input.get("include_history", False)
+        self._keepa_call_count += 1
 
         try:
             product = self.keepa_client.query_product(asin, include_history)
