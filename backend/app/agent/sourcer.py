@@ -53,6 +53,10 @@ class SourcerAgent:
         """
         logger.info("Agent starting", extra={"category": category})
 
+        # Reset per-run state on the (long-lived, shared) tool registry -
+        # e.g. the Keepa call budget for this run.
+        self.tool_registry.reset()
+
         # Get available tools
         tools = get_tool_schemas()
 
@@ -168,7 +172,9 @@ Available Tools:
    - Search for products in specific price ranges
 
 2. keepa_query: Query Amazon (Keepa) for sales data and price history
-   - Use ASIN to get sales rank, monthly sales estimates
+   - Only call this with an ASIN returned by web_search. Never invent,
+     guess, or construct an ASIN yourself - if a product has no ASIN
+     from web_search, skip it rather than making one up.
    - Verify products meet 50+ monthly sales criteria
 
 3. calculate_roi: Calculate ROI percentage
