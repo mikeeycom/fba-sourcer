@@ -31,7 +31,9 @@ def web_search_tool() -> dict:
         "description": """Search the web for products in a category.
 
 Searches major UK retailers for products. Excludes eBay, Vinted, Qogita, and Eany.
-Returns product information including title, URL, and estimated price.
+Returns product information including title, URL, estimated price, and the
+matching Amazon ASIN for that product. Always use the ASIN provided in the
+result to call keepa_query - never guess or construct an ASIN yourself.
 
 Use this to find products that might meet FBA criteria.""",
         "input_schema": {
@@ -202,7 +204,7 @@ any other tool in the same turn as this one.""",
 # Tool input/output formats
 
 
-def format_web_search_result(title: str, url: str, price: str, source: str) -> dict:
+def format_web_search_result(title: str, url: str, price: str, source: str, asin: str) -> dict:
     """Format a web search result for the agent.
 
     Args:
@@ -210,6 +212,9 @@ def format_web_search_result(title: str, url: str, price: str, source: str) -> d
         url: Source URL
         price: Estimated price
         source: Retailer name
+        asin: Matching Amazon ASIN for this product, used to run keepa_query.
+            Without this, the agent has no real ASIN to look up and will
+            invent one - always require it rather than making it optional.
 
     Returns:
         Formatted result dict
@@ -220,6 +225,7 @@ def format_web_search_result(title: str, url: str, price: str, source: str) -> d
         "url": url,
         "price": price,
         "source": source,
+        "asin": asin,
     }
 
 
