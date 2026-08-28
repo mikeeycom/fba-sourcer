@@ -1,0 +1,91 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fba-sourcer"
+version = "0.1.0"
+description = "AI-powered Amazon FBA product sourcing tool"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Michael Duggal", email = "puggalcreps@outlook.com"}]
+
+dependencies = [
+    # Web Framework
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+
+    # Data Validation
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+
+    # API Clients
+    "httpx>=0.25.0",
+    "anthropic>=0.28.0",
+
+    # Logging
+    "python-json-logger>=2.0",
+
+    # Utils
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    # Testing
+    "pytest>=7.4",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.1",
+
+    # Code Quality
+    "ruff>=0.1",
+
+    # Type Checking
+    "mypy>=1.5",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.1",
+    "ruff>=0.1",
+    "mypy>=1.5",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "C",      # flake8-comprehensions
+    "B",      # flake8-bugbear
+]
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+    "W292",   # Blank line at EOF
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-v --strict-markers"
+markers = [
+    "asyncio: mark test as async",
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
