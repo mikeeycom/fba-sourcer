@@ -1,4 +1,4 @@
-.PHONY: help install dev test lint format clean
+.PHONY: help install dev test lint lint-fix format clean
 
 help:
 	@echo "FBA Sourcer - Make Targets"
@@ -12,6 +12,7 @@ help:
 	@echo "Quality:"
 	@echo "  make test          Run pytest with coverage"
 	@echo "  make lint          Check code with ruff"
+	@echo "  make lint-fix      Fix code issues with ruff"
 	@echo "  make format        Format code with ruff"
 	@echo ""
 	@echo "Cleanup:"
@@ -29,6 +30,9 @@ test:
 
 lint:
 	uv run ruff check app/ tests/
+
+lint-fix:
+	uv run ruff check --fix app/ tests/
 
 format:
 	uv run ruff format app/ tests/
