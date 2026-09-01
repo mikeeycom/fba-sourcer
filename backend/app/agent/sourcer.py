@@ -5,6 +5,8 @@ It maintains conversation history, executes tools via the registry,
 and extracts qualified leads from Claude's responses.
 """
 
+from pydantic import ValidationError
+
 from app.clients.claude_client import ClaudeClient
 from app.agent.registry import ToolRegistry
 from app.agent.tools import get_tool_schemas
@@ -12,6 +14,8 @@ from app.models import Product
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+SUBMIT_LEADS_TOOL = "submit_leads"
 
 
 class SourcerAgent:
@@ -48,6 +52,10 @@ class SourcerAgent:
             List of Product objects meeting criteria (50+ sales, 20%+ ROI)
         """
         logger.info("Agent starting", extra={"category": category})
+
+        # Reset per-run state on the (long-lived, shared) tool registry -
+        # e.g. the Keepa call budget for this run.
+        self.tool_registry.reset()
 
         # Get available tools
         tools = get_tool_schemas()
@@ -96,17 +104,30 @@ class SourcerAgent:
                 },
             )
 
-            # If Claude is done (not using tools), extract leads and break
-            if stop_reason != "tool_use":
+            # If Claude called submit_leads, that's the terminal action -
+            # parse the structured leads and stop, regardless of any other
+            # tool calls in the same turn.
+            submit_block = self._find_tool_call(content, SUBMIT_LEADS_TOOL)
+            if submit_block:
                 logger.info(
-                    "Agent finished",
+                    "Agent submitted leads",
+                    extra={"category": category, "iterations": iteration},
+                )
+                leads = self._parse_leads(submit_block.input)
+                break
+
+            # If Claude stopped without calling any tool (including
+            # submit_leads), it gave up or ran out of things to do - there
+            # are no leads to extract from free text.
+            if stop_reason != "tool_use":
+                logger.warning(
+                    "Agent stopped without submitting leads",
                     extra={
                         "category": category,
                         "iterations": iteration,
                         "stop_reason": stop_reason,
                     },
                 )
-                leads = self._extract_leads(content)
                 break
 
             # Execute tool calls and add results back to conversation
@@ -151,12 +172,18 @@ Available Tools:
    - Search for products in specific price ranges
 
 2. keepa_query: Query Amazon (Keepa) for sales data and price history
-   - Use ASIN to get sales rank, monthly sales estimates
+   - Only call this with an ASIN returned by web_search. Never invent,
+     guess, or construct an ASIN yourself - if a product has no ASIN
+     from web_search, skip it rather than making one up.
    - Verify products meet 50+ monthly sales criteria
 
 3. calculate_roi: Calculate ROI percentage
    - Input: selling price (current Amazon price) and cost price
    - Verify 20%+ ROI is achievable
+
+4. submit_leads: Submit your final list of 5-7 qualified leads
+   - Call this ONLY once every lead is validated against both criteria
+   - This ends your research - do not call it alongside other tools
 
 Sourcing Strategy:
 1. Use web_search to find product candidates in '{category}'
@@ -164,10 +191,7 @@ Sourcing Strategy:
 3. Use keepa_query to verify 50+ monthly sales
 4. Calculate realistic cost price (usually 40-60% of selling price)
 5. Use calculate_roi to confirm 20%+ ROI is possible
-6. Build a list of 5-7 qualified leads
-
-Return final results when you have found 5-7 qualified leads. Format as:
-ASIN | Title | Current Price | Est. Monthly Sales | ROI% | Max Cost to Achieve 20% ROI
+6. Once you have 5-7 qualified leads, call submit_leads with the full list
 
 Start searching now for '{category}' products."""
 
@@ -181,6 +205,21 @@ Start searching now for '{category}' products."""
             True if content has tool_use blocks
         """
         return any(hasattr(block, "type") and block.type == "tool_use" for block in content)
+
+    def _find_tool_call(self, content: list, tool_name: str):
+        """Find the first tool_use block matching a given tool name.
+
+        Args:
+            content: List of content blocks from Claude
+            tool_name: Name of the tool to look for (e.g. 'submit_leads')
+
+        Returns:
+            The matching tool_use block, or None if not present
+        """
+        for block in content:
+            if hasattr(block, "type") and block.type == "tool_use" and block.name == tool_name:
+                return block
+        return None
 
     def _execute_tools(self, content: list) -> list:
         """Execute tool calls from Claude response.
@@ -226,25 +265,36 @@ Start searching now for '{category}' products."""
 
         return tool_results
 
-    def _extract_leads(self, content: list) -> list[Product]:
-        """Extract leads from Claude's final response.
+    def _parse_leads(self, submit_leads_input: dict) -> list[Product]:
+        """Parse and validate leads from a submit_leads tool call.
 
-        Parses Claude's structured response to extract qualified products.
+        Each lead is validated against the Product model. Invalid leads
+        (e.g. Claude produced a malformed field) are logged and skipped
+        rather than failing the whole batch.
 
         Args:
-            content: List of content blocks from Claude's final response
+            submit_leads_input: The 'input' dict from the submit_leads tool_use block
 
         Returns:
-            List of Product objects
+            List of validated Product objects (may be fewer than submitted
+            if some failed validation)
         """
-        # For now, return empty list
-        # TODO: Parse Claude's response text and extract leads
-        # This would require:
-        # 1. Extract text blocks from content
-        # 2. Parse structured format (ASIN | Title | Price | Sales | ROI%)
-        # 3. Create Product objects from parsed data
-        # 4. Validate all required fields present
-        #
-        # Implemented in next phase after testing agent loop
-        logger.info("Extracting leads from response (TODO: implement parser)")
-        return []
+        raw_leads = submit_leads_input.get("leads", [])
+        leads = []
+
+        for raw_lead in raw_leads:
+            try:
+                leads.append(Product(**raw_lead))
+            except ValidationError as e:
+                logger.warning(
+                    "Skipping invalid lead from agent",
+                    extra={"asin": raw_lead.get("asin"), "error": str(e)},
+                )
+
+        if len(leads) < len(raw_leads):
+            logger.warning(
+                "Some submitted leads failed validation",
+                extra={"submitted": len(raw_leads), "valid": len(leads)},
+            )
+
+        return leads

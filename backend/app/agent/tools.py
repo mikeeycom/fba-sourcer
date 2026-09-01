@@ -17,6 +17,7 @@ def get_tool_schemas() -> list[dict]:
         web_search_tool(),
         keepa_query_tool(),
         calculate_roi_tool(),
+        submit_leads_tool(),
     ]
 
 
@@ -30,7 +31,9 @@ def web_search_tool() -> dict:
         "description": """Search the web for products in a category.
 
 Searches major UK retailers for products. Excludes eBay, Vinted, Qogita, and Eany.
-Returns product information including title, URL, and estimated price.
+Returns product information including title, URL, estimated price, and the
+matching Amazon ASIN for that product. Always use the ASIN provided in the
+result to call keepa_query - never guess or construct an ASIN yourself.
 
 Use this to find products that might meet FBA criteria.""",
         "input_schema": {
@@ -122,10 +125,86 @@ Use this to verify products meet the 20%+ ROI requirement.""",
     }
 
 
+def submit_leads_tool() -> dict:
+    """Tool for the agent to submit its final list of qualified leads.
+
+    This is the agent's terminal action - calling it ends the research
+    loop. Structured output avoids parsing free-text from the agent.
+    """
+    return {
+        "name": "submit_leads",
+        "description": """Submit your final list of 5-7 qualified FBA product leads.
+
+Call this ONLY when each lead has been validated against both criteria:
+- 50+ estimated monthly sales (confirmed via keepa_query)
+- 20%+ ROI (confirmed via calculate_roi)
+
+This ends your research and returns the leads to the user. Do not call
+any other tool in the same turn as this one.""",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "leads": {
+                    "type": "array",
+                    "description": "5 to 7 qualified product leads",
+                    "minItems": 5,
+                    "maxItems": 7,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "asin": {
+                                "type": "string",
+                                "description": "Amazon Standard Identification Number",
+                            },
+                            "title": {
+                                "type": "string",
+                                "description": "Product title",
+                            },
+                            "price": {
+                                "type": "number",
+                                "description": "Current Amazon selling price (GBP)",
+                                "minimum": 0,
+                            },
+                            "cost": {
+                                "type": "number",
+                                "description": "Estimated sourcing cost (GBP)",
+                                "minimum": 0,
+                            },
+                            "monthly_sales": {
+                                "type": "integer",
+                                "description": "Estimated monthly sales, from keepa_query",
+                                "minimum": 0,
+                            },
+                            "roi": {
+                                "type": "number",
+                                "description": "ROI as a decimal (0.2 = 20%), from calculate_roi",
+                                "minimum": 0,
+                            },
+                            "source_url": {
+                                "type": "string",
+                                "description": "URL where the product was sourced (optional)",
+                            },
+                        },
+                        "required": [
+                            "asin",
+                            "title",
+                            "price",
+                            "cost",
+                            "monthly_sales",
+                            "roi",
+                        ],
+                    },
+                },
+            },
+            "required": ["leads"],
+        },
+    }
+
+
 # Tool input/output formats
 
 
-def format_web_search_result(title: str, url: str, price: str, source: str) -> dict:
+def format_web_search_result(title: str, url: str, price: str, source: str, asin: str) -> dict:
     """Format a web search result for the agent.
 
     Args:
@@ -133,6 +212,9 @@ def format_web_search_result(title: str, url: str, price: str, source: str) -> d
         url: Source URL
         price: Estimated price
         source: Retailer name
+        asin: Matching Amazon ASIN for this product, used to run keepa_query.
+            Without this, the agent has no real ASIN to look up and will
+            invent one - always require it rather than making it optional.
 
     Returns:
         Formatted result dict
@@ -143,6 +225,7 @@ def format_web_search_result(title: str, url: str, price: str, source: str) -> d
         "url": url,
         "price": price,
         "source": source,
+        "asin": asin,
     }
 
 

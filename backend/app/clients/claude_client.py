@@ -29,7 +29,7 @@ class ClaudeClient:
         self,
         messages: list[dict],
         tools: list[dict],
-        model: str = "claude-3-5-sonnet-20241022",
+        model: str = "claude-sonnet-5",
         max_tokens: int = 4096,
     ) -> dict:
         """Call Claude with tool use.
