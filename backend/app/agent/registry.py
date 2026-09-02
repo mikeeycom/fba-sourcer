@@ -221,13 +221,15 @@ class ToolRegistry:
         """Execute ROI calculation tool.
 
         Args:
-            tool_input: Dict with 'selling_price' and 'cost_price'
+            tool_input: Dict with 'selling_price', 'cost_price', and
+                optional 'fees'
 
         Returns:
             ROI calculation or error
         """
         selling_price = tool_input.get("selling_price")
         cost_price = tool_input.get("cost_price")
+        fees = tool_input.get("fees", 0.0)
 
         if selling_price is None or cost_price is None:
             return format_tool_error(
@@ -235,7 +237,7 @@ class ToolRegistry:
             )
 
         try:
-            roi = calculate_roi(selling_price, cost_price)
-            return format_roi_result(selling_price, cost_price, roi)
+            roi = calculate_roi(selling_price, cost_price, fees)
+            return format_roi_result(selling_price, cost_price, roi, fees)
         except ValueError as e:
             return format_tool_error("calculate_roi", str(e))
