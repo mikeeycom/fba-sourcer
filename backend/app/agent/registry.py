@@ -7,9 +7,15 @@ The registry looks up the handler and delegates to it.
 
 from app.clients.web_search_client import WebSearchClient
 from app.clients.keepa_client import KeepaClient
+from app.clients.sp_api_client import SpApiClient
 from app.utils.calculator import calculate_roi
 from app.utils.exceptions import APIError
-from app.agent.tools import format_tool_error, format_roi_result, format_keepa_result
+from app.agent.tools import (
+    format_tool_error,
+    format_roi_result,
+    format_keepa_result,
+    format_fee_result,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -29,19 +35,43 @@ class ToolRegistry:
     """
 
     def __init__(self):
-        """Initialize registry with tool clients."""
+        """Initialize registry with tool clients.
+
+        sp_api_client is deliberately NOT built here, unlike the others -
+        it requires Amazon credentials that may not be configured yet, and
+        building it eagerly would crash the whole app on startup even for
+        users who never touch the fees tool. It's built lazily on first
+        use instead - see _get_sp_api_client().
+        """
         self.web_search_client = WebSearchClient()
         self.keepa_client = KeepaClient()
+        self.sp_api_client = None
         self._keepa_call_count = 0
+
+    def _get_sp_api_client(self) -> SpApiClient:
+        """Lazily construct and cache the SP-API client on first use.
+
+        Returns:
+            The SpApiClient instance
+
+        Raises:
+            ValueError: If SP-API credentials aren't configured - this is
+                caught by execute_tool's catch-all and turned into a
+                normal tool error, not an app crash.
+        """
+        if self.sp_api_client is None:
+            self.sp_api_client = SpApiClient()
+        return self.sp_api_client
 
     def reset(self) -> None:
         """Reset per-run state. Call this at the start of each agent run.
 
         The registry itself is a long-lived singleton (one per app process),
         so per-run counters like the Keepa call cap must be explicitly reset
-        rather than assumed fresh. Note this does NOT clear KeepaClient's
-        cache - cached results and cooldowns are intentionally kept across
-        runs given how scarce Keepa tokens are.
+        rather than assumed fresh. Note this does NOT clear KeepaClient's or
+        SpApiClient's caches - cached results/cooldowns (and SpApiClient's
+        access token) are intentionally kept across runs, since re-fetching
+        them every run wastes calls and adds latency for no benefit.
         """
         self._keepa_call_count = 0
 
@@ -65,6 +95,8 @@ class ToolRegistry:
                 return self._execute_web_search(tool_input)
             elif tool_name == "keepa_query":
                 return self._execute_keepa_query(tool_input)
+            elif tool_name == "get_fba_fees":
+                return self._execute_get_fba_fees(tool_input)
             elif tool_name == "calculate_roi":
                 return self._execute_calculate_roi(tool_input)
             else:
@@ -133,6 +165,34 @@ class ToolRegistry:
             )
         except APIError as e:
             return format_tool_error("keepa_query", str(e))
+
+    def _execute_get_fba_fees(self, tool_input: dict) -> dict:
+        """Execute the SP-API fees lookup tool.
+
+        Args:
+            tool_input: Dict with 'asin' and 'price'
+
+        Returns:
+            Fee estimate data or error
+        """
+        asin = tool_input.get("asin")
+        price = tool_input.get("price")
+
+        if not asin or price is None:
+            return format_tool_error(
+                "get_fba_fees", "Missing required parameters: asin, price"
+            )
+
+        try:
+            fees = self._get_sp_api_client().get_fees_estimate(asin, price)
+            return format_fee_result(
+                asin=fees["asin"],
+                referral_fee=fees["referral_fee"],
+                fulfillment_fee=fees["fulfillment_fee"],
+                total_fees=fees["total_fees"],
+            )
+        except APIError as e:
+            return format_tool_error("get_fba_fees", str(e))
 
     def _execute_calculate_roi(self, tool_input: dict) -> dict:
         """Execute ROI calculation tool.
