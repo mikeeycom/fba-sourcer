@@ -26,6 +26,12 @@ logger = get_logger(__name__)
 # single overly-thorough search.
 MAX_KEEPA_CALLS_PER_RUN = 8
 
+# Hard cap on get_fba_fees calls per agent run. Amazon's fee endpoint is
+# far less restrictive than Keepa (1 request/second, not 1/minute), so
+# this cap exists for consistency and to bound worst-case run latency -
+# not because fee-lookup tokens are scarce like Keepa's.
+MAX_SP_API_CALLS_PER_RUN = 10
+
 
 class ToolRegistry:
     """Registry mapping tool names to implementations.
@@ -47,6 +53,7 @@ class ToolRegistry:
         self.keepa_client = KeepaClient()
         self.sp_api_client = None
         self._keepa_call_count = 0
+        self._sp_api_call_count = 0
 
     def _get_sp_api_client(self) -> SpApiClient:
         """Lazily construct and cache the SP-API client on first use.
@@ -74,6 +81,7 @@ class ToolRegistry:
         them every run wastes calls and adds latency for no benefit.
         """
         self._keepa_call_count = 0
+        self._sp_api_call_count = 0
 
     def execute_tool(self, tool_name: str, tool_input: dict) -> dict:
         """Execute a tool by name.
@@ -182,6 +190,21 @@ class ToolRegistry:
             return format_tool_error(
                 "get_fba_fees", "Missing required parameters: asin, price"
             )
+
+        if self._sp_api_call_count >= MAX_SP_API_CALLS_PER_RUN:
+            logger.warning(
+                "SP-API call budget exhausted for this run",
+                extra={"asin": asin, "cap": MAX_SP_API_CALLS_PER_RUN},
+            )
+            return format_tool_error(
+                "get_fba_fees",
+                f"Fee lookup budget for this search ({MAX_SP_API_CALLS_PER_RUN} calls) "
+                "is exhausted. Proceed with calculate_roi without the fees parameter "
+                "for remaining products, or submit leads using only those already "
+                "validated.",
+            )
+
+        self._sp_api_call_count += 1
 
         try:
             fees = self._get_sp_api_client().get_fees_estimate(asin, price)
