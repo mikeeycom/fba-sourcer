@@ -231,6 +231,13 @@ any other tool in the same turn as this one.""",
                                 "description": "ROI as a decimal (0.2 = 20%), from calculate_roi",
                                 "minimum": 0,
                             },
+                            "fees": {
+                                "type": "number",
+                                "description": "Total Amazon fees for this product (GBP), "
+                                "from get_fba_fees. Include this whenever it was available "
+                                "so the real fee-aware ROI is visible on the final lead.",
+                                "minimum": 0,
+                            },
                             "source_url": {
                                 "type": "string",
                                 "description": "URL where the product was sourced (optional)",
