@@ -14,7 +14,7 @@ def get_tool_schemas() -> list[dict]:
         List of tool definition dicts in Claude's format
     """
     return [
-        web_search_tool(),
+        find_products_tool(),
         keepa_query_tool(),
         sp_api_fees_tool(),
         calculate_roi_tool(),
@@ -22,38 +22,49 @@ def get_tool_schemas() -> list[dict]:
     ]
 
 
-def web_search_tool() -> dict:
-    """Tool to search the web for products.
+def find_products_tool() -> dict:
+    """Tool to search Keepa's Product Finder for candidate ASINs.
 
-    Returns products from major retailers (Amazon, eBay excluded for manual review).
+    Returns real Amazon ASINs that already pass Michael's fixed sourcing
+    filters (sales rank, buy box price, offer count, rating, monthly
+    sales) - not raw web search results.
     """
     return {
-        "name": "web_search",
-        "description": """Search the web for products in a category.
+        "name": "find_products",
+        "description": """Search for candidate products in a category.
 
-Searches major UK retailers for products. Excludes eBay, Vinted, Qogita, and Eany.
-Returns product information including title, URL, estimated price, and the
-matching Amazon ASIN for that product. Always use the ASIN provided in the
-result to call keepa_query - never guess or construct an ASIN yourself.
+Returns real Amazon ASINs that already meet the sourcing criteria (sales
+rank, buy box price, offer count, rating, monthly sales) - these are
+pre-filtered, not raw search results. Use keepa_query on each ASIN
+returned to get full product details before deciding whether it's a lead.
 
-Use this to find products that might meet FBA criteria.""",
+Use this first, before keepa_query, to find candidates.""",
         "input_schema": {
             "type": "object",
             "properties": {
-                "query": {
+                "category": {
                     "type": "string",
-                    "description": """Search query. Example: 'kitchen gadgets under £30' or
-                    'electronics retailers UK' or 'home improvement products'""",
+                    "description": "Product category to search within",
+                    "enum": [
+                        "baby products",
+                        "beauty",
+                        "computers and accessories",
+                        "diy and tools",
+                        "grocery",
+                        "health and personal care",
+                        "pet supplies",
+                        "toys and games",
+                    ],
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Number of results to return (default: 10, max: 20)",
-                    "default": 10,
+                    "description": "Number of candidate ASINs to return (default: 20, max: 50)",
+                    "default": 20,
                     "minimum": 1,
-                    "maximum": 20,
+                    "maximum": 50,
                 },
             },
-            "required": ["query"],
+            "required": ["category"],
         },
     }
 
@@ -262,28 +273,20 @@ any other tool in the same turn as this one.""",
 # Tool input/output formats
 
 
-def format_web_search_result(title: str, url: str, price: str, source: str, asin: str) -> dict:
-    """Format a web search result for the agent.
+def format_find_products_result(asins: list[str], count: int) -> dict:
+    """Format a Product Finder search result for the agent.
 
     Args:
-        title: Product title
-        url: Source URL
-        price: Estimated price
-        source: Retailer name
-        asin: Matching Amazon ASIN for this product, used to run keepa_query.
-            Without this, the agent has no real ASIN to look up and will
-            invent one - always require it rather than making it optional.
+        asins: Candidate ASINs matching the sourcing filters
+        count: Number of ASINs returned
 
     Returns:
         Formatted result dict
     """
     return {
         "success": True,
-        "title": title,
-        "url": url,
-        "price": price,
-        "source": source,
-        "asin": asin,
+        "asins": asins,
+        "count": count,
     }
 
 
