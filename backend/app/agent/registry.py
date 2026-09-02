@@ -20,6 +20,30 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Product titles that disqualify a candidate outright - checked in code,
+# not left to the agent's judgment, since it's a hard house rule rather
+# than something worth spending a tool call/reasoning step on. Covers
+# trading card games broadly (any brand) and their accessories (sleeves,
+# binders, toploaders, etc.), not just Pokemon-branded items.
+EXCLUDED_TITLE_KEYWORDS = [
+    "pokemon",
+    "pokémon",
+    "trading card",
+    "tcg",
+    "yu-gi-oh",
+    "yugioh",
+    "magic: the gathering",
+    "magic the gathering",
+    "mtg",
+    "card sleeve",
+    "toploader",
+    "top loader",
+    "card binder",
+    "booster pack",
+    "booster box",
+    "elite trainer box",
+]
+
 # Hard cap on keepa_query calls per agent run. Keepa's token bucket can
 # refill as slowly as 1 token/minute, so an unbounded agent loop could
 # otherwise burn through an entire run's tokens - and future runs' - on a
@@ -192,6 +216,19 @@ class ToolRegistry:
 
         try:
             product = self.keepa_client.query_product(asin, include_history)
+
+            if self._is_excluded_title(product["title"]):
+                logger.info(
+                    "Excluded product (trading cards/accessories)",
+                    extra={"asin": asin, "title": product["title"]},
+                )
+                return format_tool_error(
+                    "keepa_query",
+                    f"'{product['title']}' is a trading card game product or "
+                    "accessory (or similar) - these are excluded from sourcing. "
+                    "Do not use this ASIN, check a different candidate instead.",
+                )
+
             return format_keepa_result(
                 asin=product["asin"],
                 title=product["title"],
@@ -276,3 +313,21 @@ class ToolRegistry:
             return format_roi_result(selling_price, cost_price, roi, fees)
         except ValueError as e:
             return format_tool_error("calculate_roi", str(e))
+
+    @staticmethod
+    def _is_excluded_title(title: str | None) -> bool:
+        """Check a product title against the hard exclusion list.
+
+        Checked in code rather than left to the agent's judgment - it's a
+        house rule, not something that needs a reasoning step each time.
+
+        Args:
+            title: Product title from Keepa, or None
+
+        Returns:
+            True if the title matches an excluded keyword
+        """
+        if not title:
+            return False
+        title_lower = title.lower()
+        return any(keyword in title_lower for keyword in EXCLUDED_TITLE_KEYWORDS)
