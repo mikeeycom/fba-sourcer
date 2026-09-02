@@ -220,7 +220,26 @@ Available Tools:
    - Verify 20%+ ROI is achievable AFTER Amazon's fees are subtracted,
      not just on raw markup
 
-5. submit_leads: Submit your final list of 5-7 qualified leads
+5. web_search: Search the real web for a cheaper source of this exact product
+   - Search by the ean from keepa_query when present (an exact barcode
+     match) - it's far more reliable than a fuzzy title search. Fall back
+     to brand + title when there's no ean
+   - eBay, Vinted, Qogita, Eany, and Amazon itself are excluded from
+     results automatically - these are never valid sourcing candidates
+   - This only finds a candidate price - it does NOT confirm the item is
+     actually in stock. Never trust a search result snippet alone
+
+6. web_fetch: Open a candidate product page to verify it before trusting it
+   - REQUIRED before using any web_search result as a real cost price -
+     open the actual product page and confirm both the price and that
+     it's genuinely in stock right now
+   - If the fetch fails, redirects to a generic category/listing page
+     instead of the specific product, or the page shows out of stock/sold
+     out/discontinued: this candidate is NOT verified. Try a different
+     search result, or fall back to the cost estimate below - never
+     report a price as real from a page you couldn't actually confirm
+
+7. submit_leads: Submit your final list of 5-7 qualified leads
    - Call this ONLY once every lead is validated against both criteria
    - This ends your research - do not call it alongside other tools
 
@@ -230,23 +249,40 @@ Sourcing Strategy:
    sales, offer count trend, and buy box concentration - reject per the
    rules above
 3. Use get_fba_fees with the ASIN and current price to get Amazon's real fee estimate
-4. Estimate a realistic sourcing cost price (usually 40-60% of selling price)
-   - You cannot verify a real supplier exists or is legitimate for this
-     price - that always needs a human to check before buying. Treat this
-     as an estimate for the ROI check, not a confirmed sourcing plan.
+4. Find a real sourcing cost - MANDATORY for every candidate, not optional:
+   - You MUST call web_search for every candidate before ever using the
+     40-60% estimate. Going straight to an estimate without searching
+     first is not acceptable, even though it's faster - a guess is far
+     less useful to the user than a real number, so always search first
+   - Search by the ean from keepa_query when present (an exact barcode
+     match) to find this exact product cheaper than the Amazon price at a
+     real UK retailer/wholesaler
+   - Use web_fetch to open that page and confirm it's genuinely in stock
+     and the price matches, before trusting it
+   - If confirmed: use that price as cost_price, set cost_source to
+     "web_search", and include the verified page as source_url
+   - Only fall back to estimating cost as 40-60% of selling price (with
+     cost_source "estimate") after web_search genuinely turned up nothing
+     usable - not as a shortcut to save time. You cannot verify a real
+     supplier exists or is legitimate for an estimated price - that
+     always needs a human to check before buying.
+     Treat it as an estimate for the ROI check, not a confirmed sourcing plan
 5. Work out the breakeven price (cost + fees). If price_90d_low from step 2
    is below breakeven, reject the candidate - the price has crashed into
    unprofitable territory recently and could again
 6. Use calculate_roi with selling price, cost price, and the fees from step 3
    to confirm 20%+ NET ROI is possible
 7. Once you have 5-7 qualified leads, call submit_leads with the full list,
-   including fees, offer_count_trend, and price_floor_ok for each one
+   including fees, offer_count_trend, price_floor_ok, and cost_source for
+   each one
 
-Two things you can never verify, and should not claim to have checked:
-whether the seller is actually allowed to sell this product (brand/gating
-restrictions), and whether a real supplier for it is legitimate. Leads are
-"worth manually reviewing", not "ready to buy" - the user checks both of
-those themselves before purchasing any stock.
+Two things you can never verify, and should not claim to have checked, even
+for a web_search-sourced lead: whether the seller is actually allowed to
+sell this product (brand/gating restrictions), and whether a supplier is a
+legitimate business (real company, ships reliably, provides invoices) - a
+verified price and stock status is not the same as a verified supplier.
+Leads are "worth manually reviewing", not "ready to buy" - the user checks
+both of those themselves before purchasing any stock.
 
 Start searching now for '{category}' products."""
 
