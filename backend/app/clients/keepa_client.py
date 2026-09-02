@@ -340,8 +340,8 @@ class KeepaClient:
             product: Raw product dict from Keepa's response
 
         Returns:
-            Dict with asin, title, monthly_sales, current_price, avg_price,
-            rating, offer_count_trend, buy_box_top_seller_share_pct,
+            Dict with asin, title, ean, brand, monthly_sales, current_price,
+            avg_price, rating, offer_count_trend, buy_box_top_seller_share_pct,
             buy_box_dominant_seller_warning, price_90d_low
         """
         stats = product.get("stats") or {}
@@ -356,9 +356,16 @@ class KeepaClient:
 
         top_seller_share_pct = self._extract_buy_box_top_share(stats)
 
+        # First element is Keepa's primary EAN for this ASIN, when known -
+        # a precise search key for reverse sourcing (an exact barcode beats
+        # a fuzzy title match). None when Keepa has no EAN on file.
+        ean_list = product.get("eanList") or []
+
         return {
             "asin": product.get("asin"),
             "title": product.get("title"),
+            "ean": ean_list[0] if ean_list else None,
+            "brand": product.get("brand"),
             "monthly_sales": monthly_sales,
             "current_price": self._extract_current_price(stats, current),
             "avg_price": self._extract_price(avg180),
