@@ -202,6 +202,8 @@ class ToolRegistry:
                 offer_count_trend=product["offer_count_trend"],
                 buy_box_top_seller_share_pct=product["buy_box_top_seller_share_pct"],
                 buy_box_dominant_seller_warning=product["buy_box_dominant_seller_warning"],
+                ean=product["ean"],
+                brand=product["brand"],
                 price_90d_low=product["price_90d_low"],
             )
         except APIError as e:

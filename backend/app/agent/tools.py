@@ -4,7 +4,27 @@ Tools define what the Claude agent can do. Each tool has:
 - name: Unique identifier
 - description: What the tool does
 - input_schema: What parameters it accepts (JSON schema)
+
+web_search_tool() and web_fetch_tool() are the exception - they're
+Anthropic's own server-side tools (Claude executes them directly, not via
+our ToolRegistry), so they return a server-tool descriptor instead of a
+custom input_schema. They still go in the same tools list as everything
+else passed to Claude.
 """
+
+# Domains reverse sourcing should never treat as a supplier: manual-review-
+# only marketplaces (matches the exclusion list the old mocked search used),
+# plus Amazon itself - the point is finding a *cheaper alternative* source.
+BLOCKED_SOURCING_DOMAINS = [
+    "ebay.co.uk",
+    "ebay.com",
+    "vinted.co.uk",
+    "vinted.com",
+    "qogita.com",
+    "eany.com",
+    "amazon.co.uk",
+    "amazon.com",
+]
 
 
 def get_tool_schemas() -> list[dict]:
@@ -18,8 +38,44 @@ def get_tool_schemas() -> list[dict]:
         keepa_query_tool(),
         sp_api_fees_tool(),
         calculate_roi_tool(),
+        web_search_tool(),
+        web_fetch_tool(),
         submit_leads_tool(),
     ]
+
+
+def web_search_tool() -> dict:
+    """Anthropic's server-side web search tool, for reverse sourcing.
+
+    Executed by Claude directly (not routed through ToolRegistry). Used to
+    find a cheaper real-world listing for a product Keepa already
+    identified - searching by exact EAN when available is far more precise
+    than a fuzzy title match.
+    """
+    return {
+        "type": "web_search_20250305",
+        "name": "web_search",
+        "max_uses": 15,
+        "blocked_domains": BLOCKED_SOURCING_DOMAINS,
+    }
+
+
+def web_fetch_tool() -> dict:
+    """Anthropic's server-side page-fetch tool, for stock verification.
+
+    Executed by Claude directly. A search result snippet can't prove a
+    product is actually in stock right now - this lets Claude open the
+    candidate page itself and check before trusting the price.
+    """
+    return {
+        "type": "web_fetch_20250910",
+        "name": "web_fetch",
+        "max_uses": 15,
+        "blocked_domains": BLOCKED_SOURCING_DOMAINS,
+        # Only need enough of the page to see price + stock status, not the
+        # whole thing.
+        "max_content_tokens": 2000,
+    }
 
 
 def find_products_tool() -> dict:
@@ -272,6 +328,14 @@ any other tool in the same turn as this one.""",
                                 "at or above your computed breakeven price. Include when "
                                 "you were able to check it.",
                             },
+                            "cost_source": {
+                                "type": "string",
+                                "description": "'web_search' if cost is a real, "
+                                "stock-verified supplier price found via web_search + "
+                                "web_fetch. 'estimate' if it's still a 40-60% guess "
+                                "because no real price could be confirmed.",
+                                "enum": ["web_search", "estimate"],
+                            },
                             "source_url": {
                                 "type": "string",
                                 "description": "URL where the product was sourced (optional)",
@@ -324,6 +388,8 @@ def format_keepa_result(
     buy_box_top_seller_share_pct: float = None,
     buy_box_dominant_seller_warning: bool = None,
     price_90d_low: float = None,
+    ean: str = None,
+    brand: str = None,
 ) -> dict:
     """Format a Keepa query result for the agent.
 
@@ -341,6 +407,10 @@ def format_keepa_result(
             more than 75% of the buy box (checklist #9)
         price_90d_low: Lowest price in the last 90 days, only populated
             when include_history=True was requested (checklist #8)
+        ean: Product's barcode, when Keepa has one - use this for
+            reverse-sourcing web searches, it's a precise match unlike a
+            fuzzy title search. None if Keepa has no EAN on file.
+        brand: Product's brand name, the fallback search key when ean is None
 
     Returns:
         Formatted result dict
@@ -357,6 +427,8 @@ def format_keepa_result(
         "buy_box_top_seller_share_pct": buy_box_top_seller_share_pct,
         "buy_box_dominant_seller_warning": buy_box_dominant_seller_warning,
         "price_90d_low": price_90d_low,
+        "ean": ean,
+        "brand": brand,
     }
 
 
