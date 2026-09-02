@@ -116,6 +116,17 @@ class SourcerAgent:
                 leads = self._parse_leads(submit_block.input)
                 break
 
+            # A long-running web search/fetch can pause mid-turn.
+            # Anthropic's documented pattern is to resend the conversation
+            # exactly as-is (already appended above) rather than treating
+            # this as "Claude gave up" - so just loop and call again.
+            if stop_reason == "pause_turn":
+                logger.info(
+                    "Agent turn paused (long-running search), resuming",
+                    extra={"category": category, "iteration": iteration},
+                )
+                continue
+
             # If Claude stopped without calling any tool (including
             # submit_leads), it gave up or ran out of things to do - there
             # are no leads to extract from free text.
@@ -133,6 +144,16 @@ class SourcerAgent:
             # Execute tool calls and add results back to conversation
             tool_results = self._execute_tools(content)
             if not tool_results:
+                if self._has_tool_use(content):
+                    # Turn only contained server-side tool blocks (web
+                    # search/fetch) - Claude already has those results
+                    # inline and will continue on its own next call;
+                    # nothing for us to relay back, but the run isn't over.
+                    logger.info(
+                        "Turn had only server-side tool use, continuing",
+                        extra={"iteration": iteration},
+                    )
+                    continue
                 logger.warning("No tools found in response", extra={"iteration": iteration})
                 break
 
@@ -230,15 +251,23 @@ those themselves before purchasing any stock.
 Start searching now for '{category}' products."""
 
     def _has_tool_use(self, content: list) -> bool:
-        """Check if content contains tool_use blocks.
+        """Check if content contains any tool_use blocks - client or server.
+
+        Server-side blocks (web_search/web_fetch) execute automatically via
+        Claude, not through our registry, but still count as "something
+        happened this turn" for logging and for telling apart a genuinely
+        empty turn from one that only used a server-side tool.
 
         Args:
             content: List of content blocks from Claude
 
         Returns:
-            True if content has tool_use blocks
+            True if content has tool_use or server_tool_use blocks
         """
-        return any(hasattr(block, "type") and block.type == "tool_use" for block in content)
+        return any(
+            hasattr(block, "type") and block.type in ("tool_use", "server_tool_use")
+            for block in content
+        )
 
     def _find_tool_call(self, content: list, tool_name: str):
         """Find the first tool_use block matching a given tool name.
