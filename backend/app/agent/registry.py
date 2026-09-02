@@ -5,17 +5,17 @@ When the agent needs to execute a tool, it calls registry.execute_tool(name, inp
 The registry looks up the handler and delegates to it.
 """
 
+from app.agent.tools import (
+    format_fee_result,
+    format_find_products_result,
+    format_keepa_result,
+    format_roi_result,
+    format_tool_error,
+)
 from app.clients.keepa_client import KeepaClient
 from app.clients.sp_api_client import SpApiClient
 from app.utils.calculator import calculate_roi
 from app.utils.exceptions import APIError
-from app.agent.tools import (
-    format_tool_error,
-    format_roi_result,
-    format_keepa_result,
-    format_fee_result,
-    format_find_products_result,
-)
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
