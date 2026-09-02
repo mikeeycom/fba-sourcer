@@ -260,6 +260,18 @@ any other tool in the same turn as this one.""",
                                 "so the real fee-aware ROI is visible on the final lead.",
                                 "minimum": 0,
                             },
+                            "offer_count_trend": {
+                                "type": "string",
+                                "description": "From keepa_query's offer_count_trend - "
+                                "include when available.",
+                                "enum": ["increasing", "stable", "decreasing"],
+                            },
+                            "price_floor_ok": {
+                                "type": "boolean",
+                                "description": "True if keepa_query's price_90d_low was "
+                                "at or above your computed breakeven price. Include when "
+                                "you were able to check it.",
+                            },
                             "source_url": {
                                 "type": "string",
                                 "description": "URL where the product was sourced (optional)",
