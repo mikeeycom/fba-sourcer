@@ -81,10 +81,20 @@ def keepa_query_tool() -> dict:
 Given an ASIN (Amazon product ID), returns:
 - Current and historical prices
 - Estimated monthly sales
-- Buy Box history
-- Sales rank trends
+- offer_count_trend: "increasing", "stable", or "decreasing" - reject
+  candidates where this is "increasing" (rising competition)
+- buy_box_top_seller_share_pct / buy_box_dominant_seller_warning: reject
+  candidates where the warning is true (one FBA seller holds over 75% of
+  the buy box - too much entrenched competition)
+- price_90d_low: the lowest price seen in the last 90 days. Only
+  populated when include_history=True. Compare this to your computed
+  breakeven price (cost + fees) - if price_90d_low is below breakeven,
+  the price has crashed below profitable territory recently and this is
+  risky to source.
 
-Use this to validate products meet the 50+ sales/month and 20%+ ROI criteria.""",
+Use this to validate products meet the 50+ sales/month and 20%+ ROI criteria,
+and to check the other checklist signals above. Pass include_history=True for
+any candidate you're seriously considering, so price_90d_low is available.""",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -96,7 +106,8 @@ Use this to validate products meet the 50+ sales/month and 20%+ ROI criteria."""
                 },
                 "include_history": {
                     "type": "boolean",
-                    "description": "Include full price history (default: false)",
+                    "description": "Include full price history, needed for "
+                    "price_90d_low (default: false)",
                     "default": False,
                 },
             },
@@ -296,6 +307,10 @@ def format_keepa_result(
     current_price: float,
     avg_price: float,
     rating: float = None,
+    offer_count_trend: str = None,
+    buy_box_top_seller_share_pct: float = None,
+    buy_box_dominant_seller_warning: bool = None,
+    price_90d_low: float = None,
 ) -> dict:
     """Format a Keepa query result for the agent.
 
@@ -305,6 +320,12 @@ def format_keepa_result(
         current_price: Current price in GBP
         avg_price: Average price from history
         rating: Product rating (optional)
+        offer_count_trend: "increasing"/"stable"/"decreasing" (checklist #1)
+        buy_box_top_seller_share_pct: Highest FBA seller's buy box win share
+        buy_box_dominant_seller_warning: True if a single FBA seller holds
+            more than 75% of the buy box (checklist #9)
+        price_90d_low: Lowest price in the last 90 days, only populated
+            when include_history=True was requested (checklist #8)
 
     Returns:
         Formatted result dict
@@ -316,6 +337,10 @@ def format_keepa_result(
         "current_price": current_price,
         "avg_price": avg_price,
         "rating": rating,
+        "offer_count_trend": offer_count_trend,
+        "buy_box_top_seller_share_pct": buy_box_top_seller_share_pct,
+        "buy_box_dominant_seller_warning": buy_box_dominant_seller_warning,
+        "price_90d_low": price_90d_low,
     }
 
 

@@ -196,6 +196,10 @@ class ToolRegistry:
                 current_price=product["current_price"],
                 avg_price=product["avg_price"],
                 rating=product["rating"],
+                offer_count_trend=product["offer_count_trend"],
+                buy_box_top_seller_share_pct=product["buy_box_top_seller_share_pct"],
+                buy_box_dominant_seller_warning=product["buy_box_dominant_seller_warning"],
+                price_90d_low=product["price_90d_low"],
             )
         except APIError as e:
             return format_tool_error("keepa_query", str(e))
