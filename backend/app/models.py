@@ -31,6 +31,12 @@ class Product(BaseModel):
         description="True if the price hasn't dropped below breakeven in the "
         "last 90 days. None if there wasn't enough price history to check.",
     )
+    cost_source: Optional[str] = Field(
+        None,
+        description="'web_search' if cost is a real, stock-verified supplier "
+        "price found via web search. 'estimate' if it's still a 40-60% guess. "
+        "None if not set.",
+    )
     source_url: Optional[str] = Field(None, description="Source retailer URL")
 
     class Config:
@@ -47,6 +53,7 @@ class Product(BaseModel):
                 "fees": 4.5,
                 "offer_count_trend": "stable",
                 "price_floor_ok": True,
+                "cost_source": "web_search",
                 "source_url": "https://example.com/product",
             }
         }
@@ -87,6 +94,7 @@ class FindLeadsResponse(BaseModel):
                         "fees": 4.5,
                         "offer_count_trend": "stable",
                         "price_floor_ok": True,
+                        "cost_source": "web_search",
                         "source_url": "https://example.com/product",
                     }
                 ],
