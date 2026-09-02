@@ -15,7 +15,7 @@ The agent returns 5-7 qualified leads per search session for manual review with 
 - **Backend**: FastAPI + Python
 - **Package Manager**: UV
 - **Agent**: Claude API + Tool Use
-- **APIs**: Keepa (product data), Claude Web Search
+- **APIs**: Keepa (product data), Amazon SP-API (real fee data), Claude Web Search
 - **Frontend**: Vue.js (lightweight)
 - **Deployment**: Local machine
 
@@ -54,7 +54,8 @@ fba-sourcer/
 2. **Agent orchestrates** → Claude decides which tools to use:
    - Web search to find candidates
    - Keepa queries to validate sales volume
-   - ROI calculations to verify profitability
+   - Amazon SP-API to get real Amazon fees for that product
+   - ROI calculations (using real fees, not guesses) to verify profitability
 3. **Multi-turn loop** → Claude sees results and decides next steps until finding 5-7 leads
 4. **Manual review** → User reviews results in SellerAmp and Keepa for final validation
 
@@ -67,4 +68,9 @@ Create a `.env` file:
 ```
 CLAUDE_API_KEY=your-key-here
 KEEPA_API_KEY=your-key-here
+
+# Amazon SP-API (for real fee data) - see .env.example for setup notes
+SP_API_CLIENT_ID=your-key-here
+SP_API_CLIENT_SECRET=your-key-here
+SP_API_REFRESH_TOKEN=your-key-here
 ```
