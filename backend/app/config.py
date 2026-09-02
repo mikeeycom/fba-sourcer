@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     claude_api_key: str
     keepa_api_key: str
 
+    # SP-API (Amazon fee estimates) - from Seller Central > Develop Apps
+    sp_api_client_id: str
+    sp_api_client_secret: str
+    sp_api_refresh_token: str
+
     # Server
     app_title: str = "FBA Sourcer"
     app_version: str = "0.1.0"
