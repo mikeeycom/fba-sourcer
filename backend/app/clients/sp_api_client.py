@@ -326,6 +326,10 @@ class SpApiClient:
         failure (Status != "Success") rather than an HTTP error status -
         this must be checked explicitly, not assumed from a 200 response.
 
+        Confirmed against a live response: the whole result is wrapped in
+        a top-level "payload" key that isn't documented in most reference
+        material - easy to miss.
+
         Args:
             data: Raw JSON response from the fees endpoint
 
@@ -335,7 +339,8 @@ class SpApiClient:
         Raises:
             APIError: If the response reports a body-level failure
         """
-        result = (data or {}).get("FeesEstimateResult") or {}
+        payload = (data or {}).get("payload") or {}
+        result = payload.get("FeesEstimateResult") or {}
         status = result.get("Status")
 
         if status != "Success":
