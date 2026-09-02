@@ -134,14 +134,19 @@ calculations have.""",
 def calculate_roi_tool() -> dict:
     """Tool to calculate ROI for a product.
 
-    Simple calculation: (selling_price - cost) / cost.
+    Calculation: (selling_price - cost - fees) / cost.
     """
     return {
         "name": "calculate_roi",
         "description": """Calculate ROI (Return on Investment) percentage for a product.
 
-Given selling price and cost price, returns ROI as a decimal.
-Example: ROI of 0.2 means 20% profit margin.
+Given selling price, cost price, and (optionally) Amazon's fees, returns ROI
+as a decimal. Example: ROI of 0.2 means 20% profit margin.
+
+ALWAYS call get_fba_fees first and pass its total_fees here when possible -
+without fees, the ROI is naive and will look much higher than what you'd
+actually make, since it ignores what Amazon takes off the sale. Only omit
+fees if get_fba_fees genuinely couldn't get a result for this product.
 
 Use this to verify products meet the 20%+ ROI requirement.""",
         "input_schema": {
@@ -156,6 +161,14 @@ Use this to verify products meet the 20%+ ROI requirement.""",
                     "type": "number",
                     "description": "Cost to source/acquire the product (in GBP)",
                     "minimum": 0.01,
+                },
+                "fees": {
+                    "type": "number",
+                    "description": "Total Amazon fees for this sale (GBP), from "
+                    "get_fba_fees's total_fees. Omit or pass 0 only if fee data "
+                    "isn't available - the resulting ROI will then be optimistic.",
+                    "minimum": 0,
+                    "default": 0,
                 },
             },
             "required": ["selling_price", "cost_price"],
@@ -322,21 +335,28 @@ def format_fee_result(
     }
 
 
-def format_roi_result(selling_price: float, cost_price: float, roi: float) -> dict:
+def format_roi_result(
+    selling_price: float, cost_price: float, roi: float, fees: float = 0.0
+) -> dict:
     """Format an ROI calculation result for the agent.
 
     Args:
         selling_price: Selling price in GBP
         cost_price: Cost price in GBP
         roi: ROI as decimal (0.2 = 20%)
+        fees: Amazon fees netted out of this ROI, if any
 
     Returns:
-        Formatted result dict
+        Formatted result dict. Includes fees_included so it's visible at a
+        glance (in logs, or to the agent) whether this ROI is a real,
+        fee-aware number or a naive one.
     """
     return {
         "success": True,
         "selling_price": selling_price,
         "cost_price": cost_price,
+        "fees": fees,
+        "fees_included": fees > 0,
         "roi": roi,
         "roi_percent": f"{roi * 100:.1f}%",
     }
