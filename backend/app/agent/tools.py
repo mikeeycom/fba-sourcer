@@ -315,6 +315,7 @@ def format_find_products_result(asins: list[str], count: int) -> dict:
 
 def format_keepa_result(
     asin: str,
+    title: str,
     monthly_sales: int,
     current_price: float,
     avg_price: float,
@@ -328,6 +329,8 @@ def format_keepa_result(
 
     Args:
         asin: Amazon ASIN
+        title: Product title, for submit_leads - without this the agent has
+            no real title and will invent a placeholder
         monthly_sales: Estimated monthly sales
         current_price: Current price in GBP
         avg_price: Average price from history
@@ -345,6 +348,7 @@ def format_keepa_result(
     return {
         "success": True,
         "asin": asin,
+        "title": title,
         "monthly_sales": monthly_sales,
         "current_price": current_price,
         "avg_price": avg_price,

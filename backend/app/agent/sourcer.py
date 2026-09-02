@@ -43,7 +43,7 @@ class SourcerAgent:
         """Find FBA leads in a category.
 
         Orchestrates multi-turn conversation with Claude to find 5-7 qualified leads.
-        Uses web_search, keepa_query, and calculate_roi tools.
+        Uses find_products, keepa_query, get_fba_fees, and calculate_roi tools.
 
         Args:
             category: Product category to search (e.g., 'kitchen gadgets')
@@ -167,15 +167,26 @@ Criteria for qualified products:
 - Realistic sourcing opportunity
 
 Available Tools:
-1. web_search: Search UK retailers for products in the category
-   - Use this first to find candidate products
-   - Search for products in specific price ranges
+1. find_products: Search for candidate products in the category
+   - Use this first. It returns real Amazon ASINs that already pass a
+     fixed set of sourcing filters (sales rank, buy box price, offer
+     count, rating, monthly sales) - these are pre-vetted candidates,
+     not raw search results
+   - Never invent, guess, or construct an ASIN yourself - only work with
+     ASINs this tool (or keepa_query) actually returned
 
-2. keepa_query: Query Amazon (Keepa) for sales data and price history
-   - Only call this with an ASIN returned by web_search. Never invent,
-     guess, or construct an ASIN yourself - if a product has no ASIN
-     from web_search, skip it rather than making one up.
+2. keepa_query: Query Amazon (Keepa) for sales data and checklist signals
+   - Call with include_history=True for any candidate you're seriously
+     considering, so price_90d_low is populated
    - Verify products meet 50+ monthly sales criteria
+   - REJECT the candidate if buy_box_dominant_seller_warning is true (one
+     FBA seller has over 75% of the buy box - too entrenched to compete with)
+   - Do NOT auto-reject on offer_count_trend alone - "increasing" is common
+     for these candidates (they were found via a filter for a recent 90-day
+     offer-count drop, so many are already climbing back from that dip).
+     Just note it and pass it through in submit_leads so the user can judge
+     it themselves alongside everything else, the same way they would by hand
+   - Note price_90d_low for step 6 below
 
 3. get_fba_fees: Get Amazon's real fee estimate (referral + FBA fulfillment fee)
    - Call this after keepa_query confirms sales, using the ASIN and current price
@@ -193,15 +204,28 @@ Available Tools:
    - This ends your research - do not call it alongside other tools
 
 Sourcing Strategy:
-1. Use web_search to find product candidates in '{category}'
-2. For each promising product, get its ASIN
-3. Use keepa_query to verify 50+ monthly sales
-4. Use get_fba_fees with the ASIN and current price to get Amazon's real fee estimate
-5. Calculate realistic cost price (usually 40-60% of selling price)
-6. Use calculate_roi with selling price, cost price, and the fees from step 4
+1. Use find_products to get candidate ASINs in '{category}'
+2. For each candidate, use keepa_query (include_history=True) to check
+   sales, offer count trend, and buy box concentration - reject per the
+   rules above
+3. Use get_fba_fees with the ASIN and current price to get Amazon's real fee estimate
+4. Estimate a realistic sourcing cost price (usually 40-60% of selling price)
+   - You cannot verify a real supplier exists or is legitimate for this
+     price - that always needs a human to check before buying. Treat this
+     as an estimate for the ROI check, not a confirmed sourcing plan.
+5. Work out the breakeven price (cost + fees). If price_90d_low from step 2
+   is below breakeven, reject the candidate - the price has crashed into
+   unprofitable territory recently and could again
+6. Use calculate_roi with selling price, cost price, and the fees from step 3
    to confirm 20%+ NET ROI is possible
 7. Once you have 5-7 qualified leads, call submit_leads with the full list,
-   including the fees field for each one
+   including fees, offer_count_trend, and price_floor_ok for each one
+
+Two things you can never verify, and should not claim to have checked:
+whether the seller is actually allowed to sell this product (brand/gating
+restrictions), and whether a real supplier for it is legitimate. Leads are
+"worth manually reviewing", not "ready to buy" - the user checks both of
+those themselves before purchasing any stock.
 
 Start searching now for '{category}' products."""
 

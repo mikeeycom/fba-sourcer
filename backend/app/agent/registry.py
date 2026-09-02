@@ -28,11 +28,13 @@ logger = get_logger(__name__)
 # to check more of them to still land 5-7 leads.
 MAX_KEEPA_CALLS_PER_RUN = 12
 
-# Hard cap on find_products calls per agent run. This is a single search
-# that returns many candidate ASINs at once, so 2 is enough to allow one
-# retry with a different category if the first search comes back empty -
-# not a token-scarcity limit like MAX_KEEPA_CALLS_PER_RUN.
-MAX_KEEPA_FINDER_CALLS_PER_RUN = 2
+# Hard cap on find_products calls per agent run. Capped at 1, not because
+# retries wouldn't be useful, but because a single find_products call costs
+# roughly 15-20x what one keepa_query call does (confirmed via live testing -
+# one search burned ~50 tokens vs ~3 for a per-ASIN lookup) from the SAME
+# shared Keepa token bucket. A retry can silently starve the budget the
+# agent needs to actually check the candidates it already has.
+MAX_KEEPA_FINDER_CALLS_PER_RUN = 1
 
 # Hard cap on get_fba_fees calls per agent run. Amazon's fee endpoint is
 # far less restrictive than Keepa (1 request/second, not 1/minute), so
@@ -192,6 +194,7 @@ class ToolRegistry:
             product = self.keepa_client.query_product(asin, include_history)
             return format_keepa_result(
                 asin=product["asin"],
+                title=product["title"],
                 monthly_sales=product["monthly_sales"],
                 current_price=product["current_price"],
                 avg_price=product["avg_price"],
