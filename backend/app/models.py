@@ -1,7 +1,8 @@
 """Pydantic models for request/response validation."""
 
+from typing import Optional
+
 from pydantic import BaseModel, Field
-from typing import Optional, Any
 
 
 class Product(BaseModel):
@@ -13,6 +14,13 @@ class Product(BaseModel):
     cost: float = Field(..., ge=0, description="Sourcing cost in GBP")
     monthly_sales: int = Field(..., ge=0, description="Estimated monthly sales")
     roi: float = Field(..., ge=0, le=10, description="ROI as decimal (0.2 = 20%)")
+    fees: Optional[float] = Field(
+        None,
+        ge=0,
+        description="Estimated Amazon fees (referral + FBA fulfillment) netted "
+        "out of roi. None if fee lookup wasn't available for this product - in "
+        "that case roi is a naive, optimistic estimate rather than a real one.",
+    )
     source_url: Optional[str] = Field(None, description="Source retailer URL")
 
     class Config:
@@ -26,6 +34,7 @@ class Product(BaseModel):
                 "cost": 30.0,
                 "monthly_sales": 150,
                 "roi": 0.67,
+                "fees": 4.5,
                 "source_url": "https://example.com/product",
             }
         }
@@ -63,6 +72,7 @@ class FindLeadsResponse(BaseModel):
                         "cost": 30.0,
                         "monthly_sales": 150,
                         "roi": 0.67,
+                        "fees": 4.5,
                         "source_url": "https://example.com/product",
                     }
                 ],

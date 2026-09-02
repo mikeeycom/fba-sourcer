@@ -16,6 +16,7 @@ def get_tool_schemas() -> list[dict]:
     return [
         web_search_tool(),
         keepa_query_tool(),
+        sp_api_fees_tool(),
         calculate_roi_tool(),
         submit_leads_tool(),
     ]
@@ -93,17 +94,59 @@ Use this to validate products meet the 50+ sales/month and 20%+ ROI criteria."""
     }
 
 
+def sp_api_fees_tool() -> dict:
+    """Tool to get Amazon's real fee estimate for a product.
+
+    Calls Amazon's own Product Fees API (Selling Partner API) - the same
+    source SellerAmp and other sourcing tools use for accurate numbers.
+    """
+    return {
+        "name": "get_fba_fees",
+        "description": """Get Amazon's real fee estimate for a product (referral fee +
+FBA fulfillment fee), straight from Amazon's own Product Fees API.
+
+Call this AFTER keepa_query has confirmed sales volume, using the ASIN and
+current price. Pass the returned total_fees into calculate_roi's fees
+parameter so ROI reflects what Amazon actually charges, not just a raw
+markup - this is what fixes the "ROI looks too good" problem naive
+calculations have.""",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "asin": {
+                    "type": "string",
+                    "description": """Amazon Standard Identification Number.
+                    Example: 'B0C9Z7X8K2' (10 alphanumeric characters)""",
+                    "pattern": "^[A-Z0-9]{10}$",
+                },
+                "price": {
+                    "type": "number",
+                    "description": "Price to estimate fees at - use the current "
+                    "Amazon selling price from keepa_query",
+                    "minimum": 0,
+                },
+            },
+            "required": ["asin", "price"],
+        },
+    }
+
+
 def calculate_roi_tool() -> dict:
     """Tool to calculate ROI for a product.
 
-    Simple calculation: (selling_price - cost) / cost.
+    Calculation: (selling_price - cost - fees) / cost.
     """
     return {
         "name": "calculate_roi",
         "description": """Calculate ROI (Return on Investment) percentage for a product.
 
-Given selling price and cost price, returns ROI as a decimal.
-Example: ROI of 0.2 means 20% profit margin.
+Given selling price, cost price, and (optionally) Amazon's fees, returns ROI
+as a decimal. Example: ROI of 0.2 means 20% profit margin.
+
+ALWAYS call get_fba_fees first and pass its total_fees here when possible -
+without fees, the ROI is naive and will look much higher than what you'd
+actually make, since it ignores what Amazon takes off the sale. Only omit
+fees if get_fba_fees genuinely couldn't get a result for this product.
 
 Use this to verify products meet the 20%+ ROI requirement.""",
         "input_schema": {
@@ -118,6 +161,14 @@ Use this to verify products meet the 20%+ ROI requirement.""",
                     "type": "number",
                     "description": "Cost to source/acquire the product (in GBP)",
                     "minimum": 0.01,
+                },
+                "fees": {
+                    "type": "number",
+                    "description": "Total Amazon fees for this sale (GBP), from "
+                    "get_fba_fees's total_fees. Omit or pass 0 only if fee data "
+                    "isn't available - the resulting ROI will then be optimistic.",
+                    "minimum": 0,
+                    "default": 0,
                 },
             },
             "required": ["selling_price", "cost_price"],
@@ -178,6 +229,13 @@ any other tool in the same turn as this one.""",
                             "roi": {
                                 "type": "number",
                                 "description": "ROI as a decimal (0.2 = 20%), from calculate_roi",
+                                "minimum": 0,
+                            },
+                            "fees": {
+                                "type": "number",
+                                "description": "Total Amazon fees for this product (GBP), "
+                                "from get_fba_fees. Include this whenever it was available "
+                                "so the real fee-aware ROI is visible on the final lead.",
                                 "minimum": 0,
                             },
                             "source_url": {
@@ -258,21 +316,54 @@ def format_keepa_result(
     }
 
 
-def format_roi_result(selling_price: float, cost_price: float, roi: float) -> dict:
-    """Format an ROI calculation result for the agent.
+def format_fee_result(
+    asin: str,
+    referral_fee: float,
+    fulfillment_fee: float,
+    total_fees: float,
+) -> dict:
+    """Format an SP-API fee estimate result for the agent.
 
     Args:
-        selling_price: Selling price in GBP
-        cost_price: Cost price in GBP
-        roi: ROI as decimal (0.2 = 20%)
+        asin: Amazon ASIN
+        referral_fee: Amazon's referral fee (percentage-of-price commission)
+        fulfillment_fee: FBA fulfillment fee (pick/pack/ship cost)
+        total_fees: Total of all fees - pass this into calculate_roi's fees param
 
     Returns:
         Formatted result dict
     """
     return {
         "success": True,
+        "asin": asin,
+        "referral_fee": referral_fee,
+        "fulfillment_fee": fulfillment_fee,
+        "total_fees": total_fees,
+    }
+
+
+def format_roi_result(
+    selling_price: float, cost_price: float, roi: float, fees: float = 0.0
+) -> dict:
+    """Format an ROI calculation result for the agent.
+
+    Args:
+        selling_price: Selling price in GBP
+        cost_price: Cost price in GBP
+        roi: ROI as decimal (0.2 = 20%)
+        fees: Amazon fees netted out of this ROI, if any
+
+    Returns:
+        Formatted result dict. Includes fees_included so it's visible at a
+        glance (in logs, or to the agent) whether this ROI is a real,
+        fee-aware number or a naive one.
+    """
+    return {
+        "success": True,
         "selling_price": selling_price,
         "cost_price": cost_price,
+        "fees": fees,
+        "fees_included": fees > 0,
         "roi": roi,
         "roi_percent": f"{roi * 100:.1f}%",
     }

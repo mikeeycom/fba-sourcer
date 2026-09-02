@@ -7,9 +7,9 @@ and extracts qualified leads from Claude's responses.
 
 from pydantic import ValidationError
 
-from app.clients.claude_client import ClaudeClient
 from app.agent.registry import ToolRegistry
 from app.agent.tools import get_tool_schemas
+from app.clients.claude_client import ClaudeClient
 from app.models import Product
 from app.utils.logger import get_logger
 
@@ -177,11 +177,18 @@ Available Tools:
      from web_search, skip it rather than making one up.
    - Verify products meet 50+ monthly sales criteria
 
-3. calculate_roi: Calculate ROI percentage
-   - Input: selling price (current Amazon price) and cost price
-   - Verify 20%+ ROI is achievable
+3. get_fba_fees: Get Amazon's real fee estimate (referral + FBA fulfillment fee)
+   - Call this after keepa_query confirms sales, using the ASIN and current price
+   - Pass the returned total_fees into calculate_roi's fees parameter, so
+     ROI reflects what Amazon actually takes, not just a raw markup
 
-4. submit_leads: Submit your final list of 5-7 qualified leads
+4. calculate_roi: Calculate ROI percentage
+   - Input: selling price, cost price, and (when available) total fees
+     from get_fba_fees
+   - Verify 20%+ ROI is achievable AFTER Amazon's fees are subtracted,
+     not just on raw markup
+
+5. submit_leads: Submit your final list of 5-7 qualified leads
    - Call this ONLY once every lead is validated against both criteria
    - This ends your research - do not call it alongside other tools
 
@@ -189,9 +196,12 @@ Sourcing Strategy:
 1. Use web_search to find product candidates in '{category}'
 2. For each promising product, get its ASIN
 3. Use keepa_query to verify 50+ monthly sales
-4. Calculate realistic cost price (usually 40-60% of selling price)
-5. Use calculate_roi to confirm 20%+ ROI is possible
-6. Once you have 5-7 qualified leads, call submit_leads with the full list
+4. Use get_fba_fees with the ASIN and current price to get Amazon's real fee estimate
+5. Calculate realistic cost price (usually 40-60% of selling price)
+6. Use calculate_roi with selling price, cost price, and the fees from step 4
+   to confirm 20%+ NET ROI is possible
+7. Once you have 5-7 qualified leads, call submit_leads with the full list,
+   including the fees field for each one
 
 Start searching now for '{category}' products."""
 
