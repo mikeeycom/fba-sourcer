@@ -1,6 +1,8 @@
 """Keepa API client for Amazon product sales and price data."""
 
+import json
 import time
+from datetime import datetime, timezone
 
 import httpx
 
@@ -13,10 +15,15 @@ logger = get_logger(__name__)
 KEEPA_BASE_URL = "https://api.keepa.com"
 KEEPA_DOMAIN_UK = 2  # Keepa domain ID for amazon.co.uk
 
+# Keepa timestamps in history arrays are "Keepa minutes" - minutes since
+# this epoch, not Unix time.
+KEEPA_EPOCH = datetime(2011, 1, 1, tzinfo=timezone.utc)
+
 # Indices into Keepa's "stats.current" / "stats.avgNN" arrays (Keepa CSV Types).
 # See: https://keepa.com/#!discuss/t/product-object/116
 STAT_IDX_AMAZON_PRICE = 0
 STAT_IDX_NEW_FBA_PRICE = 10
+STAT_IDX_COUNT_NEW = 11
 STAT_IDX_RATING = 16
 
 # Keepa uses negative sentinels (-1, -2) for "no data available" in stats
@@ -26,6 +33,34 @@ STAT_IDX_RATING = 16
 # plan. Retrying a just-failed ASIN immediately is guaranteed to fail again,
 # so failures are cached for this long before a retry is allowed.
 FAILURE_COOLDOWN_SECONDS = 90
+
+# Fixed "OA" (online arbitrage) sourcing filters for the Product Finder
+# search - Michael's manual Keepa filter checklist, encoded as constants
+# rather than exposed as tool params, so the agent can't loosen them.
+FINDER_MAX_SALES_RANK = 50_000
+FINDER_MIN_BUYBOX_PRICE_PENCE = 700  # £7.00
+# Amazon itself out of stock most of the time (i.e. little/no direct Amazon
+# competition on the listing). Default threshold - not confirmed against
+# Keepa's own "tick the out of stock box" UI preset, tune after live results.
+FINDER_MIN_AMAZON_OOS_PCT = 80
+FINDER_MIN_OFFER_COUNT_365D_AVG = 2
+# Negative = a drop. -1 means "offer count fell by at least 1% over 90 days".
+FINDER_MAX_OFFER_COUNT_90D_DELTA_PCT = -1
+FINDER_MIN_MONTHLY_SOLD = 50
+FINDER_MIN_RATING = 40  # Keepa's rating scale is x10 (40 == 4.0 stars)
+
+# Keepa root category IDs for amazon.co.uk (domain=2), looked up live via
+# Keepa's /category endpoint - not guessed.
+CATEGORY_MAP = {
+    "baby products": "59624031",
+    "beauty": "117332031",
+    "computers and accessories": "340831031",
+    "diy and tools": "79903031",
+    "grocery": "340834031",
+    "health and personal care": "65801031",
+    "pet supplies": "340840031",
+    "toys and games": "468292",
+}
 
 
 class KeepaClient:
@@ -106,6 +141,107 @@ class KeepaClient:
         except APIError:
             self._failure_cooldown[asin] = time.time()
             raise
+
+    def find_products(self, category: str, limit: int = 20) -> list[str]:
+        """Search Keepa's Product Finder for candidate ASINs.
+
+        Applies Michael's fixed "OA" sourcing filters (sales rank, buy box
+        price, offer count, rating, monthly sales - see the FINDER_*
+        constants) within the given category. Unlike query_product, this
+        isn't cached - it's a fresh search each call, not a per-ASIN lookup.
+
+        Args:
+            category: One of the keys in CATEGORY_MAP
+            limit: Max ASINs to return (capped at 50, Keepa's page size)
+
+        Returns:
+            List of ASIN strings matching all the fixed filter criteria
+
+        Raises:
+            APIError: If the category is unrecognized or the Keepa request fails
+        """
+        category_id = CATEGORY_MAP.get(category)
+        if category_id is None:
+            raise APIError(
+                f"Unknown category: {category!r}. Must be one of: "
+                f"{', '.join(CATEGORY_MAP)}"
+            )
+
+        limit = min(limit, 50)
+        # No perPage/page sent - Keepa enforces a minimum page size of 50
+        # (smaller values 400), so we just take Keepa's default-sized page
+        # and trim to `limit` ourselves after the fact.
+        selection = {
+            "current_SALES_lte": FINDER_MAX_SALES_RANK,
+            "current_BUY_BOX_SHIPPING_gte": FINDER_MIN_BUYBOX_PRICE_PENCE,
+            "outOfStockPercentage90_gte": FINDER_MIN_AMAZON_OOS_PCT,
+            "rootCategory": [category_id],
+            "avg365_COUNT_NEW_gte": FINDER_MIN_OFFER_COUNT_365D_AVG,
+            "deltaPercent90_COUNT_NEW_lte": FINDER_MAX_OFFER_COUNT_90D_DELTA_PCT,
+            "monthlySold_gte": FINDER_MIN_MONTHLY_SOLD,
+            "current_RATING_gte": FINDER_MIN_RATING,
+            "productType": ["0"],  # standard products only
+        }
+
+        start_time = time.time()
+        params = {
+            "key": self.api_key,
+            "domain": KEEPA_DOMAIN_UK,
+            "selection": json.dumps(selection),
+        }
+
+        try:
+            logger.info("Keepa product finder call", extra={"category": category})
+
+            response = httpx.get(
+                f"{KEEPA_BASE_URL}/query", params=params, timeout=self.timeout
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            latency_ms = (time.time() - start_time) * 1000
+            asins = data.get("asinList") or []
+
+            logger.info(
+                "Keepa product finder success",
+                extra={
+                    "category": category,
+                    "latency_ms": latency_ms,
+                    "result_count": len(asins),
+                    "tokens_left": data.get("tokensLeft"),
+                },
+            )
+
+            return asins[:limit]
+
+        except httpx.TimeoutException as e:
+            latency_ms = (time.time() - start_time) * 1000
+            logger.error(
+                "Keepa product finder timeout",
+                extra={"category": category, "latency_ms": latency_ms, "error": str(e)},
+            )
+            raise APIError(f"Keepa API timeout: {str(e)}") from e
+
+        except httpx.HTTPStatusError as e:
+            latency_ms = (time.time() - start_time) * 1000
+            logger.error(
+                "Keepa product finder error",
+                extra={
+                    "category": category,
+                    "latency_ms": latency_ms,
+                    "status_code": e.response.status_code,
+                    "error": str(e),
+                },
+            )
+            raise APIError(f"Keepa API error: {str(e)}") from e
+
+        except httpx.RequestError as e:
+            latency_ms = (time.time() - start_time) * 1000
+            logger.error(
+                "Keepa product finder connection error",
+                extra={"category": category, "latency_ms": latency_ms, "error": str(e)},
+            )
+            raise APIError(f"Keepa API connection error: {str(e)}") from e
 
     def _query_product_uncached(self, asin: str, include_history: bool = False) -> dict:
         """Query Keepa's /product endpoint directly, bypassing the cache.
@@ -204,16 +340,21 @@ class KeepaClient:
             product: Raw product dict from Keepa's response
 
         Returns:
-            Dict with asin, title, monthly_sales, current_price, avg_price, rating
+            Dict with asin, title, monthly_sales, current_price, avg_price,
+            rating, offer_count_trend, buy_box_top_seller_share_pct,
+            buy_box_dominant_seller_warning, price_90d_low
         """
         stats = product.get("stats") or {}
         current = stats.get("current") or []
         avg180 = stats.get("avg180") or []
+        csv = product.get("csv") or []
 
         # Keepa provides a direct estimated monthly sold units for eligible
         # products. Falls back to 0 when Keepa has no estimate (new/low-data
         # listings) rather than guessing.
         monthly_sales = product.get("monthlySold") or 0
+
+        top_seller_share_pct = self._extract_buy_box_top_share(stats)
 
         return {
             "asin": product.get("asin"),
@@ -222,6 +363,18 @@ class KeepaClient:
             "current_price": self._extract_current_price(stats, current),
             "avg_price": self._extract_price(avg180),
             "rating": self._extract_rating(current),
+            # Checklist item #1: is the new offer count stable/decreasing?
+            "offer_count_trend": self._extract_offer_count_trend(stats),
+            # Checklist item #9: no single FBA seller hogging the buy box.
+            "buy_box_top_seller_share_pct": top_seller_share_pct,
+            "buy_box_dominant_seller_warning": (
+                top_seller_share_pct > 75 if top_seller_share_pct is not None else None
+            ),
+            # Checklist item #8: has price crashed below breakeven recently?
+            # Only available when include_history=True was requested (needs
+            # the raw price history array, "csv", which Keepa only sends
+            # then).
+            "price_90d_low": self._extract_price_floor_90d(csv),
         }
 
     def _extract_current_price(self, stats: dict, current: list) -> float | None:
@@ -245,6 +398,107 @@ class KeepaClient:
             return round(buy_box_price / 100, 2)
 
         return self._extract_price(current)
+
+    def _extract_offer_count_trend(self, stats: dict) -> str | None:
+        """Checklist #1: is the new offer count stable/decreasing or rising?
+
+        Compares the current new-offer count to its 90-day average. A
+        5% band around the average counts as "stable" so tiny day-to-day
+        noise doesn't flip the result back and forth.
+
+        Args:
+            stats: The product's "stats" dict from Keepa
+
+        Returns:
+            "increasing", "stable", "decreasing", or None if there isn't
+            enough data to tell
+        """
+        current_count = self._safe_index(stats.get("current") or [], STAT_IDX_COUNT_NEW)
+        avg90_count = self._safe_index(stats.get("avg90") or [], STAT_IDX_COUNT_NEW)
+
+        if current_count is None or avg90_count is None:
+            return None
+        if current_count < 0 or avg90_count < 0:
+            return None
+        if avg90_count == 0:
+            return "stable" if current_count == 0 else "increasing"
+
+        change = (current_count - avg90_count) / avg90_count
+        if change > 0.05:
+            return "increasing"
+        if change < -0.05:
+            return "decreasing"
+        return "stable"
+
+    def _extract_buy_box_top_share(self, stats: dict) -> float | None:
+        """Checklist #9: does one FBA seller dominate the buy box?
+
+        Walks Keepa's per-seller buy box win-share stats and returns the
+        highest percentage any single FBA seller held over the stats
+        window. Amazon retail itself and non-FBA (FBM) sellers are
+        excluded - the checklist rule is specifically about FBA
+        competition.
+
+        Args:
+            stats: The product's "stats" dict from Keepa
+
+        Returns:
+            Highest FBA seller's buy box win share (0-100), or None if
+            Keepa didn't return buy box seller stats at all
+        """
+        buy_box_stats = stats.get("buyBoxStats")
+        if not buy_box_stats:
+            return None
+
+        fba_shares = [
+            seller.get("percentageWon", 0)
+            for seller in buy_box_stats.values()
+            if seller.get("isFBA")
+        ]
+        if not fba_shares:
+            return 0.0
+
+        return round(max(fba_shares), 1)
+
+    def _extract_price_floor_90d(self, csv: list) -> float | None:
+        """Checklist #8: what's the lowest the price has gone in 90 days?
+
+        Scans the Amazon and New FBA price history channels for the
+        lowest recorded price in the last 90 days, so the agent can check
+        a candidate's breakeven price hasn't been undercut recently.
+        Requires include_history=True on the original request - without
+        it, Keepa doesn't send the raw history arrays at all.
+
+        Args:
+            csv: The product's raw "csv" history arrays from Keepa
+
+        Returns:
+            Lowest price in GBP seen in the last 90 days, or None if no
+            history is available
+        """
+        if not csv:
+            return None
+
+        cutoff_minutes = (
+            datetime.now(timezone.utc) - KEEPA_EPOCH
+        ).total_seconds() / 60 - (90 * 24 * 60)
+
+        lowest_pence = None
+        for idx in (STAT_IDX_AMAZON_PRICE, STAT_IDX_NEW_FBA_PRICE):
+            history = self._safe_index(csv, idx)
+            if not history:
+                continue
+            # Flat [time, value, time, value, ...] pairs.
+            for i in range(0, len(history) - 1, 2):
+                timestamp, price = history[i], history[i + 1]
+                if timestamp < cutoff_minutes or price < 0:
+                    continue
+                if lowest_pence is None or price < lowest_pence:
+                    lowest_pence = price
+
+        if lowest_pence is None:
+            return None
+        return round(lowest_pence / 100, 2)
 
     def _extract_price(self, price_stats: list) -> float | None:
         """Get the best available price from a Keepa stats array.

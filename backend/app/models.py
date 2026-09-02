@@ -21,6 +21,16 @@ class Product(BaseModel):
         "out of roi. None if fee lookup wasn't available for this product - in "
         "that case roi is a naive, optimistic estimate rather than a real one.",
     )
+    offer_count_trend: Optional[str] = Field(
+        None,
+        description="Whether new-offer competition is rising, stable, or "
+        "falling ('increasing'/'stable'/'decreasing'). None if unavailable.",
+    )
+    price_floor_ok: Optional[bool] = Field(
+        None,
+        description="True if the price hasn't dropped below breakeven in the "
+        "last 90 days. None if there wasn't enough price history to check.",
+    )
     source_url: Optional[str] = Field(None, description="Source retailer URL")
 
     class Config:
@@ -35,6 +45,8 @@ class Product(BaseModel):
                 "monthly_sales": 150,
                 "roi": 0.67,
                 "fees": 4.5,
+                "offer_count_trend": "stable",
+                "price_floor_ok": True,
                 "source_url": "https://example.com/product",
             }
         }
@@ -73,6 +85,8 @@ class FindLeadsResponse(BaseModel):
                         "monthly_sales": 150,
                         "roi": 0.67,
                         "fees": 4.5,
+                        "offer_count_trend": "stable",
+                        "price_floor_ok": True,
                         "source_url": "https://example.com/product",
                     }
                 ],

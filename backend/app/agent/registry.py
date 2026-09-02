@@ -5,7 +5,6 @@ When the agent needs to execute a tool, it calls registry.execute_tool(name, inp
 The registry looks up the handler and delegates to it.
 """
 
-from app.clients.web_search_client import WebSearchClient
 from app.clients.keepa_client import KeepaClient
 from app.clients.sp_api_client import SpApiClient
 from app.utils.calculator import calculate_roi
@@ -15,6 +14,7 @@ from app.agent.tools import (
     format_roi_result,
     format_keepa_result,
     format_fee_result,
+    format_find_products_result,
 )
 from app.utils.logger import get_logger
 
@@ -23,8 +23,18 @@ logger = get_logger(__name__)
 # Hard cap on keepa_query calls per agent run. Keepa's token bucket can
 # refill as slowly as 1 token/minute, so an unbounded agent loop could
 # otherwise burn through an entire run's tokens - and future runs' - on a
-# single overly-thorough search.
-MAX_KEEPA_CALLS_PER_RUN = 8
+# single overly-thorough search. Bumped from 8 -> 12: the checklist signals
+# give the agent more legitimate reasons to reject a candidate, so it needs
+# to check more of them to still land 5-7 leads.
+MAX_KEEPA_CALLS_PER_RUN = 12
+
+# Hard cap on find_products calls per agent run. Capped at 1, not because
+# retries wouldn't be useful, but because a single find_products call costs
+# roughly 15-20x what one keepa_query call does (confirmed via live testing -
+# one search burned ~50 tokens vs ~3 for a per-ASIN lookup) from the SAME
+# shared Keepa token bucket. A retry can silently starve the budget the
+# agent needs to actually check the candidates it already has.
+MAX_KEEPA_FINDER_CALLS_PER_RUN = 1
 
 # Hard cap on get_fba_fees calls per agent run. Amazon's fee endpoint is
 # far less restrictive than Keepa (1 request/second, not 1/minute), so
@@ -49,10 +59,10 @@ class ToolRegistry:
         users who never touch the fees tool. It's built lazily on first
         use instead - see _get_sp_api_client().
         """
-        self.web_search_client = WebSearchClient()
         self.keepa_client = KeepaClient()
         self.sp_api_client = None
         self._keepa_call_count = 0
+        self._keepa_finder_call_count = 0
         self._sp_api_call_count = 0
 
     def _get_sp_api_client(self) -> SpApiClient:
@@ -81,6 +91,7 @@ class ToolRegistry:
         them every run wastes calls and adds latency for no benefit.
         """
         self._keepa_call_count = 0
+        self._keepa_finder_call_count = 0
         self._sp_api_call_count = 0
 
     def execute_tool(self, tool_name: str, tool_input: dict) -> dict:
@@ -99,8 +110,8 @@ class ToolRegistry:
                 extra={"tool": tool_name, "input_keys": list(tool_input.keys())},
             )
 
-            if tool_name == "web_search":
-                return self._execute_web_search(tool_input)
+            if tool_name == "find_products":
+                return self._execute_find_products(tool_input)
             elif tool_name == "keepa_query":
                 return self._execute_keepa_query(tool_input)
             elif tool_name == "get_fba_fees":
@@ -117,22 +128,39 @@ class ToolRegistry:
             )
             return format_tool_error(tool_name, str(e))
 
-    def _execute_web_search(self, tool_input: dict) -> dict:
-        """Execute web search tool.
+    def _execute_find_products(self, tool_input: dict) -> dict:
+        """Execute the Keepa Product Finder search tool.
 
         Args:
-            tool_input: Dict with 'query' and optional 'limit'
+            tool_input: Dict with 'category' and optional 'limit'
 
         Returns:
-            Search results or error
+            Candidate ASINs or error
         """
-        query = tool_input.get("query")
-        limit = tool_input.get("limit", 10)
+        category = tool_input.get("category")
+        limit = tool_input.get("limit", 20)
 
-        if not query:
-            return format_tool_error("web_search", "Missing required parameter: query")
+        if not category:
+            return format_tool_error("find_products", "Missing required parameter: category")
 
-        return self.web_search_client.search(query, limit)
+        if self._keepa_finder_call_count >= MAX_KEEPA_FINDER_CALLS_PER_RUN:
+            logger.warning(
+                "Keepa finder call budget exhausted for this run",
+                extra={"category": category, "cap": MAX_KEEPA_FINDER_CALLS_PER_RUN},
+            )
+            return format_tool_error(
+                "find_products",
+                f"Product search budget for this run ({MAX_KEEPA_FINDER_CALLS_PER_RUN} "
+                "calls) is exhausted. Work with the candidates already found.",
+            )
+
+        self._keepa_finder_call_count += 1
+
+        try:
+            asins = self.keepa_client.find_products(category, limit)
+            return format_find_products_result(asins=asins, count=len(asins))
+        except APIError as e:
+            return format_tool_error("find_products", str(e))
 
     def _execute_keepa_query(self, tool_input: dict) -> dict:
         """Execute Keepa query tool.
@@ -166,10 +194,15 @@ class ToolRegistry:
             product = self.keepa_client.query_product(asin, include_history)
             return format_keepa_result(
                 asin=product["asin"],
+                title=product["title"],
                 monthly_sales=product["monthly_sales"],
                 current_price=product["current_price"],
                 avg_price=product["avg_price"],
                 rating=product["rating"],
+                offer_count_trend=product["offer_count_trend"],
+                buy_box_top_seller_share_pct=product["buy_box_top_seller_share_pct"],
+                buy_box_dominant_seller_warning=product["buy_box_dominant_seller_warning"],
+                price_90d_low=product["price_90d_low"],
             )
         except APIError as e:
             return format_tool_error("keepa_query", str(e))
