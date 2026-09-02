@@ -16,6 +16,7 @@ def get_tool_schemas() -> list[dict]:
     return [
         web_search_tool(),
         keepa_query_tool(),
+        sp_api_fees_tool(),
         calculate_roi_tool(),
         submit_leads_tool(),
     ]
@@ -89,6 +90,43 @@ Use this to validate products meet the 50+ sales/month and 20%+ ROI criteria."""
                 },
             },
             "required": ["asin"],
+        },
+    }
+
+
+def sp_api_fees_tool() -> dict:
+    """Tool to get Amazon's real fee estimate for a product.
+
+    Calls Amazon's own Product Fees API (Selling Partner API) - the same
+    source SellerAmp and other sourcing tools use for accurate numbers.
+    """
+    return {
+        "name": "get_fba_fees",
+        "description": """Get Amazon's real fee estimate for a product (referral fee +
+FBA fulfillment fee), straight from Amazon's own Product Fees API.
+
+Call this AFTER keepa_query has confirmed sales volume, using the ASIN and
+current price. Pass the returned total_fees into calculate_roi's fees
+parameter so ROI reflects what Amazon actually charges, not just a raw
+markup - this is what fixes the "ROI looks too good" problem naive
+calculations have.""",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "asin": {
+                    "type": "string",
+                    "description": """Amazon Standard Identification Number.
+                    Example: 'B0C9Z7X8K2' (10 alphanumeric characters)""",
+                    "pattern": "^[A-Z0-9]{10}$",
+                },
+                "price": {
+                    "type": "number",
+                    "description": "Price to estimate fees at - use the current "
+                    "Amazon selling price from keepa_query",
+                    "minimum": 0,
+                },
+            },
+            "required": ["asin", "price"],
         },
     }
 
@@ -255,6 +293,32 @@ def format_keepa_result(
         "current_price": current_price,
         "avg_price": avg_price,
         "rating": rating,
+    }
+
+
+def format_fee_result(
+    asin: str,
+    referral_fee: float,
+    fulfillment_fee: float,
+    total_fees: float,
+) -> dict:
+    """Format an SP-API fee estimate result for the agent.
+
+    Args:
+        asin: Amazon ASIN
+        referral_fee: Amazon's referral fee (percentage-of-price commission)
+        fulfillment_fee: FBA fulfillment fee (pick/pack/ship cost)
+        total_fees: Total of all fees - pass this into calculate_roi's fees param
+
+    Returns:
+        Formatted result dict
+    """
+    return {
+        "success": True,
+        "asin": asin,
+        "referral_fee": referral_fee,
+        "fulfillment_fee": fulfillment_fee,
+        "total_fees": total_fees,
     }
 
 
